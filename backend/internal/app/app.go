@@ -301,7 +301,7 @@ func (a *App) buildRouter(
 		// flood cannot reach the database (§33).
 		api.Use(httpx.Timeout(30 * time.Second))
 
-		api.Mount("/auth", authHandler.Routes())
+		api.Mount("/auth", authHandler.Routes(authMiddleware.RequireAuth))
 		api.Get("/feature-flags", flagsHandler.List)
 
 		// The news feed is readable without an account; OptionalAuth fills in
@@ -314,7 +314,6 @@ func (a *App) buildRouter(
 		api.Group(func(private chi.Router) {
 			private.Use(authMiddleware.RequireAuth)
 
-			private.Mount("/auth", authHandler.AuthenticatedRoutes())
 			private.Mount("/contacts", contactsHandler.Routes())
 			// The server's half of end-to-end encryption: a key directory and a
 			// mailbox for ciphertext it cannot read (§24).
@@ -361,6 +360,13 @@ func (a *App) buildRouter(
 
 	return r
 }
+
+// Handler exposes the assembled router.
+//
+// It exists so the end-to-end test drives the same handler chain production
+// serves — middleware, routing and all — rather than a second wiring that
+// could drift from it.
+func (a *App) Handler() http.Handler { return a.httpServer.Handler }
 
 // Run starts both servers and blocks until ctx is cancelled.
 func (a *App) Run(ctx context.Context) error {

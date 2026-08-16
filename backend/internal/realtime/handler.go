@@ -135,18 +135,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := newClient(h.hub, conn, principal.UserID, principal.DeviceID, principal.SessionID, h.logger)
-	if err := h.hub.register(client); err != nil {
-		h.logger.Error("failed to register websocket client", slog.Any("error", err))
-		client.close(websocket.CloseInternalServerErr, "could not register connection")
-		return
-	}
-
 	ctx := context.WithoutCancel(r.Context())
-	go client.writePump()
-
-	h.presence.MarkOnline(ctx, principal.UserID, principal.DeviceID)
-	_ = h.authRepo.TouchDevice(ctx, principal.DeviceID, httpx.ClientIPFrom(r.Context()))
+	client := newClient(h.hub, conn, principal.UserID, principal.DeviceID, principal.SessionID, h.logger)
 
 	// The connect frame tells the client where the server thinks it stands, so
 	// it can decide whether to resync before doing anything else.
@@ -163,6 +153,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		latest = cursor
 	}
+
+	// It is queued before the hub knows about this client and before presence
+	// is announced, because the protocol promises it is the first frame — and
+	// either of those can put a broadcast on this socket. The send queue is
+	// buffered, so queuing ahead of the write pump is safe.
 	client.sendAck("", evtConnected, map[string]any{
 		"user_id":          principal.UserID,
 		"device_id":        principal.DeviceID,
@@ -171,6 +166,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"server_seq":       latest,
 		"heartbeat_ms":     pingInterval.Milliseconds(),
 	})
+
+	if err := h.hub.register(client); err != nil {
+		h.logger.Error("failed to register websocket client", slog.Any("error", err))
+		client.close(websocket.CloseInternalServerErr, "could not register connection")
+		return
+	}
+
+	go client.writePump()
+
+	h.presence.MarkOnline(ctx, principal.UserID, principal.DeviceID)
+	_ = h.authRepo.TouchDevice(ctx, principal.DeviceID, httpx.ClientIPFrom(r.Context()))
 
 	handler := &frameHandler{
 		messaging: h.messaging,

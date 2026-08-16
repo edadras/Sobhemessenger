@@ -18,24 +18,31 @@ type Handler struct {
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 // Routes returns the public (unauthenticated) auth endpoints.
-func (h *Handler) Routes() http.Handler {
+// Routes returns the whole /auth surface.
+//
+// The endpoints that need a valid access token are a group inside this router
+// rather than a second handler mounted on the same path: chi permits only one
+// Mount per pattern, and two of them panic when the router is built.
+func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
+
+	// Starting a session cannot itself require a session.
 	r.Post("/otp/request", h.requestOTP)
 	r.Post("/otp/verify", h.verifyOTP)
+	// Refresh authenticates with the refresh token in the body, not a bearer
+	// token, precisely because the access token has usually expired by then.
 	r.Post("/refresh", h.refresh)
-	return r
-}
 
-// AuthenticatedRoutes returns the endpoints that need a valid access token.
-func (h *Handler) AuthenticatedRoutes() http.Handler {
-	r := chi.NewRouter()
-	r.Post("/logout", h.logout)
-	r.Get("/sessions", h.listSessions)
-	r.Delete("/sessions/{sessionID}", h.revokeSession)
-	r.Post("/sessions/revoke-others", h.revokeOtherSessions)
-	r.Get("/devices", h.listDevices)
-	r.Get("/login-history", h.loginHistory)
-	r.Put("/two-step", h.setTwoStep)
+	r.Group(func(private chi.Router) {
+		private.Use(requireAuth)
+		private.Post("/logout", h.logout)
+		private.Get("/sessions", h.listSessions)
+		private.Delete("/sessions/{sessionID}", h.revokeSession)
+		private.Post("/sessions/revoke-others", h.revokeOtherSessions)
+		private.Get("/devices", h.listDevices)
+		private.Get("/login-history", h.loginHistory)
+		private.Put("/two-step", h.setTwoStep)
+	})
 	return r
 }
 

@@ -1,6 +1,8 @@
 package httpx
 
 import (
+	"bufio"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -226,6 +228,19 @@ func (r *responseRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack hands the raw connection to the caller.
+//
+// The WebSocket upgrade type-asserts http.Hijacker on the ResponseWriter it is
+// given. Unwrap is not enough — only http.ResponseController consults it — so
+// without this method every upgrade behind this middleware fails.
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("httpx: the underlying ResponseWriter does not support hijacking")
+	}
+	return hijacker.Hijack()
 }
 
 func parseCIDRs(entries []string) []*net.IPNet {
