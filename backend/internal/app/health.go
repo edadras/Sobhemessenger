@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -61,12 +62,19 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		}),
-		h.check(ctx, "minio", func(ctx context.Context) error { return h.storage.Healthy(ctx) }),
+		h.check(ctx, "minio", func(ctx context.Context) error {
+			if h.storage == nil {
+				return errNotConfigured
+			}
+			return h.storage.Healthy(ctx)
+		}),
 	}
 
 	ready := true
 	for _, check := range checks {
-		if check.Status != "ok" {
+		// "not configured" is a deliberate deployment choice, not an outage,
+		// so it does not hold the instance out of the load balancer.
+		if check.Status == "error" {
 			ready = false
 		}
 	}
@@ -89,7 +97,10 @@ func (h *HealthHandler) check(ctx context.Context, name string, probe func(conte
 		Status:  "ok",
 		Latency: time.Since(start).Milliseconds(),
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, errNotConfigured):
+		result.Status = "not_configured"
+	case err != nil:
 		result.Status = "error"
 		result.Detail = err.Error()
 	}
@@ -101,3 +112,6 @@ type notConnectedError struct{}
 func (notConnectedError) Error() string { return "not connected" }
 
 var errNotConnected = notConnectedError{}
+
+// errNotConfigured marks a dependency the operator chose not to configure.
+var errNotConfigured = errors.New("not configured")

@@ -27,6 +27,7 @@ import (
 	"github.com/sobh/messenger/backend/internal/calls"
 	"github.com/sobh/messenger/backend/internal/communities"
 	"github.com/sobh/messenger/backend/internal/config"
+	"github.com/sobh/messenger/backend/internal/contacts"
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/featureflags"
 	"github.com/sobh/messenger/backend/internal/groups"
@@ -41,6 +42,7 @@ import (
 	"github.com/sobh/messenger/backend/internal/ratelimit"
 	"github.com/sobh/messenger/backend/internal/realtime"
 	"github.com/sobh/messenger/backend/internal/search"
+	"github.com/sobh/messenger/backend/internal/secretchat"
 	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/stories"
 )
@@ -58,6 +60,8 @@ type App struct {
 
 	Auth          *auth.Service
 	AuthRepo      *auth.Repository
+	Contacts      *contacts.Service
+	SecretChat    *secretchat.Service
 	Messaging     *messaging.Service
 	Media         *media.Service
 	Groups        *groups.Service
@@ -75,6 +79,22 @@ type App struct {
 
 	httpServer    *http.Server
 	metricsServer *http.Server
+}
+
+// Dependencies are the external systems the application runs on.
+//
+// New connects them from configuration; Assemble takes them already built.
+// Splitting the two is what lets the end-to-end test drive the real router
+// against a real database, cache and message bus rather than a stand-in.
+type Dependencies struct {
+	DB    *database.DB
+	Cache *cache.Client
+	Bus   *bus.Bus
+	// Storage may be nil. The media module is then not mounted and readiness
+	// reports object storage as unconfigured — production config validation
+	// requires credentials, so this only happens deliberately.
+	Storage *storage.Client
+	Metrics *observability.Metrics
 }
 
 // New builds the application. Any dependency that fails to connect aborts
@@ -114,6 +134,24 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 		return nil, err
 	}
 
+	return Assemble(ctx, cfg, logger, Dependencies{
+		DB: db, Cache: cacheClient, Bus: messageBus,
+		Storage: storageClient, Metrics: metrics,
+	})
+}
+
+// Assemble wires the domain modules onto already-connected dependencies.
+func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps Dependencies) (*App, error) {
+	db := deps.DB
+	cacheClient := deps.Cache
+	messageBus := deps.Bus
+	storageClient := deps.Storage
+
+	metrics := deps.Metrics
+	if metrics == nil {
+		metrics = observability.New(cfg.ServiceName)
+	}
+
 	limiter := ratelimit.New(cacheClient, metrics)
 	rules := ratelimit.NewRules(cfg.RateLimits)
 
@@ -137,8 +175,17 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 	messagingRepo := messaging.NewRepository(db)
 	messagingService := messaging.NewService(messagingRepo, messageBus, limiter, rules, metrics, logger)
 
-	mediaService := media.NewService(media.NewRepository(db), storageClient, messageBus,
-		limiter, rules, cfg.Media, metrics, logger)
+	contactsService := contacts.NewService(contacts.NewRepository(db), limiter, rules, cfg.Auth)
+	secretChatService := secretchat.NewService(secretchat.NewRepository(db), messagingRepo,
+		messageBus, logger)
+
+	var mediaService *media.Service
+	if storageClient != nil {
+		mediaService = media.NewService(media.NewRepository(db), storageClient, messageBus,
+			limiter, rules, cfg.Media, metrics, logger)
+	} else {
+		logger.Warn("object storage is not configured; the media module is disabled")
+	}
 
 	groupsService := groups.NewService(groups.NewRepository(db), messagingRepo,
 		messageBus, cfg, logger)
@@ -173,6 +220,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 		cfg: cfg, logger: logger, metrics: metrics,
 		DB: db, Cache: cacheClient, Bus: messageBus, Storage: storageClient,
 		Auth: authService, AuthRepo: authRepo, Messaging: messagingService,
+		Contacts: contactsService, SecretChat: secretChatService,
 		Media: mediaService, Groups: groupsService, Communities: communitiesService,
 		Stories: storiesService, Polls: pollsService, Calls: callsService,
 		News: newsService, Notifications: notificationsService, Search: searchService,
@@ -226,8 +274,13 @@ func (a *App) buildRouter(
 	r.Get("/ready", health.Ready)
 
 	authHandler := auth.NewHandler(authService)
+	contactsHandler := contacts.NewHandler(a.Contacts)
+	secretChatHandler := secretchat.NewHandler(a.SecretChat)
 	messagingHandler := messaging.NewHandler(messagingService)
-	mediaHandler := media.NewHandler(a.Media)
+	var mediaHandler *media.Handler
+	if a.Media != nil {
+		mediaHandler = media.NewHandler(a.Media)
+	}
 	groupsHandler := groups.NewHandler(a.Groups)
 	communitiesHandler := communities.NewHandler(a.Communities)
 	storiesHandler := stories.NewHandler(a.Stories)
@@ -262,13 +315,19 @@ func (a *App) buildRouter(
 			private.Use(authMiddleware.RequireAuth)
 
 			private.Mount("/auth", authHandler.AuthenticatedRoutes())
+			private.Mount("/contacts", contactsHandler.Routes())
+			// The server's half of end-to-end encryption: a key directory and a
+			// mailbox for ciphertext it cannot read (§24).
+			private.Mount("/secret", secretChatHandler.Routes())
 			private.Route("/chats", func(chats chi.Router) {
 				messagingHandler.RegisterChatRoutes(chats)
 				groupsHandler.RegisterRoutes(chats)
 			})
 			private.Mount("/messages", messagingHandler.MessageRoutes())
 			private.Mount("/sync", messagingHandler.SyncRoutes())
-			private.Mount("/media", mediaHandler.Routes())
+			if mediaHandler != nil {
+				private.Mount("/media", mediaHandler.Routes())
+			}
 			private.Mount("/communities", communitiesHandler.Routes())
 			private.Mount("/stories", storiesHandler.Routes())
 			private.Mount("/polls", pollsHandler.Routes())
