@@ -23,8 +23,9 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
-func (h *Handler) ChatRoutes() http.Handler {
-	r := chi.NewRouter()
+// RegisterChatRoutes adds the conversation endpoints to the /chats router,
+// which it shares with the group administration handler.
+func (h *Handler) RegisterChatRoutes(r chi.Router) {
 	r.Get("/", h.listChats)
 	r.Post("/private", h.openPrivateChat)
 	r.Get("/{chatID}/messages", h.history)
@@ -32,7 +33,6 @@ func (h *Handler) ChatRoutes() http.Handler {
 	r.Post("/{chatID}/read", h.markRead)
 	r.Put("/{chatID}/draft", h.setDraft)
 	r.Post("/{chatID}/typing", h.typing)
-	return r
 }
 
 func (h *Handler) MessageRoutes() http.Handler {

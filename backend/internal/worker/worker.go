@@ -14,8 +14,10 @@ import (
 	"github.com/sobh/messenger/backend/internal/cache"
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/database"
+	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/storage"
 )
 
 // Runner owns the queue consumers and the periodic maintenance loop.
@@ -23,7 +25,10 @@ type Runner struct {
 	db        *database.DB
 	cache     *cache.Client
 	bus       *bus.Bus
+	storage   *storage.Client
 	messaging *messaging.Repository
+	mediaRepo *media.Repository
+	scanner   media.Scanner
 	cfg       *config.Config
 	metrics   *observability.Metrics
 	logger    *slog.Logger
@@ -36,14 +41,18 @@ func New(
 	db *database.DB,
 	cacheClient *cache.Client,
 	messageBus *bus.Bus,
+	storageClient *storage.Client,
 	messagingRepo *messaging.Repository,
+	mediaRepo *media.Repository,
 	cfg *config.Config,
 	metrics *observability.Metrics,
 	logger *slog.Logger,
 ) *Runner {
 	return &Runner{
-		db: db, cache: cacheClient, bus: messageBus, messaging: messagingRepo,
-		cfg: cfg, metrics: metrics, logger: logger,
+		db: db, cache: cacheClient, bus: messageBus, storage: storageClient,
+		messaging: messagingRepo, mediaRepo: mediaRepo,
+		scanner: media.NewScanner(cfg.Media.ClamAVAddr),
+		cfg:     cfg, metrics: metrics, logger: logger,
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 }
@@ -56,6 +65,7 @@ func (r *Runner) Start(ctx context.Context) error {
 		retries int
 		handler bus.JobHandler
 	}{
+		{bus.SubjectJobMediaProcess, "media-process", 3, r.handleMediaProcess},
 		{bus.SubjectJobSearchIndex, "search-index", 5, r.handleSearchIndex},
 		{bus.SubjectJobAnalytics, "analytics", 3, r.handleAnalytics},
 		{bus.SubjectJobCleanup, "maintenance", 2, r.handleCleanup},
@@ -120,6 +130,8 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 		{"consumed_sync_events", r.pruneSyncEvents},
 		{"expired_stories", r.expireStories},
 		{"abandoned_uploads", r.expireUploadSessions},
+		{"released_upload_parts", r.reapExpiredUploads},
+		{"stranded_media", r.retryStrandedMedia},
 		{"expired_turn_credentials", r.pruneTURNCredentials},
 		{"scheduled_articles", r.publishScheduledArticles},
 	}
@@ -246,4 +258,27 @@ func (r *Runner) handleAnalytics(ctx context.Context, job bus.Job) error {
 func (r *Runner) handleCleanup(ctx context.Context, job bus.Job) error {
 	r.runMaintenance(ctx)
 	return nil
+}
+
+// retryStrandedMedia re-enqueues objects whose processing job was lost — a
+// worker that died mid-job, or a publish that failed after the upload
+// completed. Without this an object would sit pending forever.
+func (r *Runner) retryStrandedMedia(ctx context.Context) (int64, error) {
+	pending, err := r.mediaRepo.PendingProcessing(ctx, 50)
+	if err != nil {
+		return 0, err
+	}
+
+	var requeued int64
+	for _, object := range pending {
+		// The stream deduplicates by message id, so re-publishing an object
+		// that is genuinely still queued is harmless.
+		if err := r.bus.PublishJob(ctx, bus.SubjectJobMediaProcess,
+			"retry-"+object.ID.String(),
+			map[string]any{"media_id": object.ID, "kind": object.Kind}); err != nil {
+			return requeued, err
+		}
+		requeued++
+	}
+	return requeued, nil
 }

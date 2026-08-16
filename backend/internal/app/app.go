@@ -23,16 +23,22 @@ import (
 	"github.com/sobh/messenger/backend/internal/auth"
 	"github.com/sobh/messenger/backend/internal/bus"
 	"github.com/sobh/messenger/backend/internal/cache"
+	"github.com/sobh/messenger/backend/internal/calls"
+	"github.com/sobh/messenger/backend/internal/communities"
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/featureflags"
+	"github.com/sobh/messenger/backend/internal/groups"
 	"github.com/sobh/messenger/backend/internal/httpx"
+	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/polls"
 	"github.com/sobh/messenger/backend/internal/presence"
 	"github.com/sobh/messenger/backend/internal/ratelimit"
 	"github.com/sobh/messenger/backend/internal/realtime"
 	"github.com/sobh/messenger/backend/internal/storage"
+	"github.com/sobh/messenger/backend/internal/stories"
 )
 
 // App holds every long-lived dependency and the servers built on top of them.
@@ -46,12 +52,18 @@ type App struct {
 	Bus     *bus.Bus
 	Storage *storage.Client
 
-	Auth      *auth.Service
-	AuthRepo  *auth.Repository
-	Messaging *messaging.Service
-	Presence  *presence.Service
-	Flags     *featureflags.Service
-	Hub       *realtime.Hub
+	Auth        *auth.Service
+	AuthRepo    *auth.Repository
+	Messaging   *messaging.Service
+	Media       *media.Service
+	Groups      *groups.Service
+	Communities *communities.Service
+	Stories     *stories.Service
+	Polls       *polls.Service
+	Calls       *calls.Service
+	Presence    *presence.Service
+	Flags       *featureflags.Service
+	Hub         *realtime.Hub
 
 	httpServer    *http.Server
 	metricsServer *http.Server
@@ -117,12 +129,27 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 	messagingRepo := messaging.NewRepository(db)
 	messagingService := messaging.NewService(messagingRepo, messageBus, limiter, rules, metrics, logger)
 
+	mediaService := media.NewService(media.NewRepository(db), storageClient, messageBus,
+		limiter, rules, cfg.Media, metrics, logger)
+
+	groupsService := groups.NewService(groups.NewRepository(db), messagingRepo,
+		messageBus, cfg, logger)
+
+	communitiesService := communities.NewService(communities.NewRepository(db), groupsService)
+
+	storiesService := stories.NewService(stories.NewRepository(db))
+	pollsService := polls.NewService(polls.NewRepository(db), messagingService)
+	callsService := calls.NewService(calls.NewRepository(db), messagingRepo,
+		messageBus, cfg.Calls, logger)
+
 	hub := realtime.NewHub(cfg.NodeID, messageBus, metrics, logger)
 
 	app := &App{
 		cfg: cfg, logger: logger, metrics: metrics,
 		DB: db, Cache: cacheClient, Bus: messageBus, Storage: storageClient,
 		Auth: authService, AuthRepo: authRepo, Messaging: messagingService,
+		Media: mediaService, Groups: groupsService, Communities: communitiesService,
+		Stories: storiesService, Polls: pollsService, Calls: callsService,
 		Presence: presenceService, Flags: flags, Hub: hub,
 	}
 
@@ -173,6 +200,12 @@ func (a *App) buildRouter(
 
 	authHandler := auth.NewHandler(authService)
 	messagingHandler := messaging.NewHandler(messagingService)
+	mediaHandler := media.NewHandler(a.Media)
+	groupsHandler := groups.NewHandler(a.Groups)
+	communitiesHandler := communities.NewHandler(a.Communities)
+	storiesHandler := stories.NewHandler(a.Stories)
+	pollsHandler := polls.NewHandler(a.Polls)
+	callsHandler := calls.NewHandler(a.Calls)
 	flagsHandler := featureflags.NewHandler(a.Flags)
 
 	wsHandler := realtime.NewHandler(a.Hub, authMiddleware, a.AuthRepo,
@@ -191,9 +224,17 @@ func (a *App) buildRouter(
 			private.Use(authMiddleware.RequireAuth)
 
 			private.Mount("/auth", authHandler.AuthenticatedRoutes())
-			private.Mount("/chats", messagingHandler.ChatRoutes())
+			private.Route("/chats", func(chats chi.Router) {
+				messagingHandler.RegisterChatRoutes(chats)
+				groupsHandler.RegisterRoutes(chats)
+			})
 			private.Mount("/messages", messagingHandler.MessageRoutes())
 			private.Mount("/sync", messagingHandler.SyncRoutes())
+			private.Mount("/media", mediaHandler.Routes())
+			private.Mount("/communities", communitiesHandler.Routes())
+			private.Mount("/stories", storiesHandler.Routes())
+			private.Mount("/polls", pollsHandler.Routes())
+			private.Mount("/calls", callsHandler.Routes())
 		})
 	})
 

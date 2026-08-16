@@ -18,8 +18,10 @@ import (
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/logging"
+	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/worker"
 )
 
@@ -57,7 +59,14 @@ func main() {
 	}
 	defer messageBus.Close()
 
-	runner := worker.New(db, cacheClient, messageBus, messaging.NewRepository(db), cfg, metrics, logger)
+	storageClient, err := storage.Connect(ctx, cfg.Storage)
+	if err != nil {
+		logger.Error("could not connect to object storage", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	runner := worker.New(db, cacheClient, messageBus, storageClient,
+		messaging.NewRepository(db), media.NewRepository(db), cfg, metrics, logger)
 	if err := runner.Start(ctx); err != nil {
 		logger.Error("worker failed to start", slog.Any("error", err))
 		os.Exit(1)
