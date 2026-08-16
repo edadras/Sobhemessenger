@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS chat_join_requests;
+DROP TABLE IF EXISTS chat_invite_links;
+DROP TABLE IF EXISTS chat_settings;
+DROP TABLE IF EXISTS chat_members;
+DROP TABLE IF EXISTS private_chat_keys;
+DROP TABLE IF EXISTS chats;
+DROP TABLE IF EXISTS blocked_users;
+DROP TABLE IF EXISTS contact_requests;
+DROP TABLE IF EXISTS contacts;

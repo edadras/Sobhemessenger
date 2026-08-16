@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS feature_flags;
+DROP TABLE IF EXISTS otp_challenges;
+DROP TABLE IF EXISTS login_history;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS user_events;
+DROP TABLE IF EXISTS user_event_counters;
+DROP TABLE IF EXISTS user_privacy_settings;
+DROP TABLE IF EXISTS user_profiles;
+DROP TABLE IF EXISTS users;

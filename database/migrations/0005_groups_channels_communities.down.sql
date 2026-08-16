@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS secret_chat_sessions;
+DROP TABLE IF EXISTS device_one_time_prekeys;
+DROP TABLE IF EXISTS device_identity_keys;
+DROP TABLE IF EXISTS close_friends;
+DROP TABLE IF EXISTS story_views;
+DROP TABLE IF EXISTS stories;
+DROP TABLE IF EXISTS community_rooms;
+DROP TABLE IF EXISTS community_members;
+ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_community_fk;
+DROP TABLE IF EXISTS communities;
+DROP TABLE IF EXISTS channel_post_views;
+DROP TABLE IF EXISTS channel_post_stats;
+DROP TABLE IF EXISTS channels;
+DROP TABLE IF EXISTS group_permissions;
+DROP TABLE IF EXISTS group_roles;
+DROP TABLE IF EXISTS groups;
+ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_last_message_fk;

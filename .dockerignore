@@ -1,0 +1,6 @@
+.git
+apps/mobile/build
+apps/mobile/.dart_tool
+apps/admin/build
+apps/admin/.dart_tool
+**/*.log

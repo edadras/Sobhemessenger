@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS analytics_daily;
+DROP TABLE IF EXISTS data_requests;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS admin_users;
+DROP TABLE IF EXISTS admin_roles;
+DROP TABLE IF EXISTS spam_scores;
+DROP TABLE IF EXISTS bans;
+DROP TABLE IF EXISTS reports;
+DROP TABLE IF EXISTS notification_deliveries;
+DROP TABLE IF EXISTS notification_settings;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS push_tokens;

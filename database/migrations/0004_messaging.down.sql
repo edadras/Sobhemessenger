@@ -1,0 +1,10 @@
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_poll_fk;
+DROP TABLE IF EXISTS poll_votes;
+DROP TABLE IF EXISTS poll_options;
+DROP TABLE IF EXISTS polls;
+DROP TABLE IF EXISTS message_edits;
+DROP TABLE IF EXISTS message_mentions;
+DROP TABLE IF EXISTS message_reads;
+DROP TABLE IF EXISTS message_reactions;
+DROP TABLE IF EXISTS message_attachments;
+DROP TABLE IF EXISTS messages;

@@ -1,0 +1,30 @@
+.env
+.env.*
+!.env.example
+
+# Go
+backend/bin/
+*.test
+coverage.out
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+apps/*/ios/Pods/
+apps/*/ios/.symlinks/
+apps/*/android/.gradle/
+apps/*/android/local.properties
+apps/*/.idea/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local data
+pgdata/
+*.log

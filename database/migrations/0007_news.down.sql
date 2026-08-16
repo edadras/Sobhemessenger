@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS news_bookmarks;
+DROP TABLE IF EXISTS news_follows;
+DROP TABLE IF EXISTS news_article_views;
+DROP TABLE IF EXISTS news_article_translations;
+DROP TABLE IF EXISTS news_article_tags;
+DROP TABLE IF EXISTS news_tags;
+DROP TABLE IF EXISTS news_article_gallery;
+DROP TABLE IF EXISTS news_articles;
+DROP TABLE IF EXISTS news_authors;
+DROP TABLE IF EXISTS news_category_names;
+DROP TABLE IF EXISTS news_categories;

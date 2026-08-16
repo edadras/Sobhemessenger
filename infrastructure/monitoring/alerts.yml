@@ -1,0 +1,50 @@
+# Alerts derived from the performance targets in §79 and the probes in §36.
+groups:
+  - name: sobh-availability
+    rules:
+      - alert: SobhApiDown
+        expr: up{job="sobh-api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "SOBH API instance is not reachable"
+
+      - alert: SobhHighErrorRate
+        expr: |
+          sum(rate(sobh_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(sobh_http_requests_total[5m])) > 0.02
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than 2% of API requests are failing"
+
+  - name: sobh-latency
+    rules:
+      # §79: API p95 under 200ms.
+      - alert: SobhApiLatencyBudgetBreached
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(sobh_http_request_duration_seconds_bucket[5m])) by (le)) > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency is above the 200ms target"
+
+      # §79: message delivery under 500ms.
+      - alert: SobhMessageDeliverySlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(sobh_ws_delivery_delay_seconds_bucket[5m])) by (le)) > 0.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "WebSocket delivery p95 is above the 500ms target"
+
+  - name: sobh-queues
+    rules:
+      - alert: SobhQueueFailuresRising
+        expr: sum(rate(sobh_queue_failures_total[10m])) by (subject) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Background jobs are failing on {{ $labels.subject }}"

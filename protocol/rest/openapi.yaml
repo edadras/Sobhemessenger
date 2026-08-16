@@ -1,0 +1,771 @@
+openapi: 3.1.0
+
+info:
+  title: SOBH Messenger API
+  version: 1.0.0
+  description: |
+    REST surface of the SOBH platform. Every response uses the envelope from
+    §66, every path is versioned under `/api/v1` (§67), and every authenticated
+    call carries a Bearer access token.
+
+    Endpoints marked **planned** are specified here but not yet implemented;
+    they are listed so client work can proceed against a stable contract. See
+    `docs/architecture/roadmap.md` for the delivery order.
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.sobh.app
+    description: Production
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Authentication
+  - name: Chats
+  - name: Messages
+  - name: Sync
+  - name: Platform
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Platform]
+      summary: Liveness probe
+      description: Answers whether the process is alive. Touches no dependency.
+      security: []
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /ready:
+    get:
+      tags: [Platform]
+      summary: Readiness probe
+      description: Checks PostgreSQL, Redis, NATS and object storage.
+      security: []
+      responses:
+        "200": { description: Ready to serve traffic }
+        "503":
+          description: A dependency is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/feature-flags:
+    get:
+      tags: [Platform]
+      summary: List feature flags
+      description: |
+        Anonymous callers see the global state. Signed-in callers see their own
+        bucketed answer, so the client can hide a feature instead of letting the
+        user hit an error.
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: Current flags
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          flags:
+                            type: array
+                            items: { $ref: "#/components/schemas/FeatureFlag" }
+
+  /api/v1/auth/otp/request:
+    post:
+      tags: [Authentication]
+      summary: Request a verification code
+      description: |
+        Sends a one-time code by SMS. The response is identical whether or not
+        an account exists for the number, so it cannot be used to enumerate
+        users. Limited per phone number and per IP address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  description: |
+                    Any common spelling is accepted and normalised to E.164:
+                    `+98…`, `0098…`, `09…`, and Persian or Arabic-Indic digits.
+                  examples: ["+989123456789", "09123456789", "۰۹۱۲۳۴۵۶۷۸۹"]
+      responses:
+        "200":
+          description: Code dispatched
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          expires_in: { type: integer, description: Seconds until the code expires }
+                          resend_after: { type: integer, description: Seconds before a resend is allowed }
+                          length: { type: integer }
+                          debug_code:
+                            type: string
+                            description: Development only; refused in production.
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/v1/auth/otp/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify a code and sign in
+      description: |
+        Exchanges the code for a token pair, creating the account on first use
+        and registering the calling device. When the account has two-step
+        verification, the first call returns `TWO_STEP_REQUIRED` and the client
+        retries with `password` — the code stays valid for that retry.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string }
+                password: { type: string, description: Two-step password, when enabled }
+                device_name: { type: string, examples: ["Pixel 8"] }
+                platform:
+                  type: string
+                  enum: [android, ios, web, desktop, unknown]
+                app_version: { type: string, examples: ["1.0.0"] }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/TokenPair" }
+        "401":
+          description: |
+            `INVALID_OTP`, `OTP_EXPIRED`, `OTP_ATTEMPTS_EXCEEDED`,
+            `TWO_STEP_REQUIRED` or `INVALID_PASSWORD`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "403":
+          description: "`ACCOUNT_BANNED` or `TOO_MANY_DEVICES`"
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Rotate the refresh token
+      description: |
+        Returns a new access **and** refresh token. Rotation is mandatory: the
+        presented token is invalidated immediately, so replaying it fails and a
+        stolen token is single-use.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Rotated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/TokenPair" }
+        "401": { description: "`SESSION_REVOKED` — sign in again" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Sign out of the calling session
+      responses:
+        "200": { description: Signed out (idempotent) }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/sessions:
+    get:
+      tags: [Authentication]
+      summary: List active sessions
+      responses:
+        "200":
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          sessions:
+                            type: array
+                            items: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/sessions/{sessionID}:
+    delete:
+      tags: [Authentication]
+      summary: Revoke another device's session
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Revoked }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/auth/sessions/revoke-others:
+    post:
+      tags: [Authentication]
+      summary: Sign out every other device
+      responses:
+        "200":
+          description: Count of revoked sessions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/auth/devices:
+    get:
+      tags: [Authentication]
+      summary: List registered devices
+      responses:
+        "200": { description: Devices }
+
+  /api/v1/auth/login-history:
+    get:
+      tags: [Authentication]
+      summary: Recent sign-in activity
+      responses:
+        "200": { description: Login history }
+
+  /api/v1/auth/two-step:
+    put:
+      tags: [Authentication]
+      summary: Set, change or remove the two-step password
+      description: |
+        An empty `new_password` disables two-step verification. Any change bumps
+        the account's token version, signing every existing session out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8 }
+                hint: { type: string }
+      responses:
+        "200": { description: Updated }
+        "401": { description: "`INVALID_PASSWORD`" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/chats:
+    get:
+      tags: [Chats]
+      summary: List the caller's chats
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 100 }
+        - name: before
+          in: query
+          description: RFC3339 timestamp cursor from `meta.next_cursor`.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Chat list, pinned first then most recently active
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          chats:
+                            type: array
+                            items: { $ref: "#/components/schemas/Chat" }
+
+  /api/v1/chats/private:
+    post:
+      tags: [Chats]
+      summary: Open (or create) a private chat
+      description: Idempotent — one chat exists per pair of users, in either order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "200": { description: The chat id }
+
+  /api/v1/chats/{chatID}/messages:
+    get:
+      tags: [Messages]
+      summary: Read chat history
+      description: Newest first, seeking by sequence number rather than offset.
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: before_seq
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: after_seq
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          messages:
+                            type: array
+                            items: { $ref: "#/components/schemas/Message" }
+        "403": { description: "`NOT_CHAT_MEMBER`" }
+        "404": { description: "`CHAT_NOT_FOUND`" }
+
+    post:
+      tags: [Messages]
+      summary: Send a message
+      description: |
+        The REST equivalent of the `message.send` WebSocket event, with the same
+        idempotency guarantee: `client_message_id` makes a retry return the
+        original message rather than creating a duplicate.
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Message" }
+        "403":
+          description: "`CHAT_PERMISSION_DENIED`, `NOT_CHAT_MEMBER` or `SLOW_MODE_ACTIVE`"
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/chats/{chatID}/read:
+    post:
+      tags: [Messages]
+      summary: Advance the read cursor
+      description: The cursor never moves backwards; a lower value is ignored.
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq]
+              properties:
+                seq: { type: integer, format: int64 }
+      responses:
+        "200": { description: New cursor position }
+
+  /api/v1/chats/{chatID}/draft:
+    put:
+      tags: [Chats]
+      summary: Store an unsent draft
+      description: Drafts follow the user across their devices.
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                draft: { type: string }
+      responses:
+        "200": { description: Saved }
+
+  /api/v1/chats/{chatID}/typing:
+    post:
+      tags: [Chats]
+      summary: Broadcast a typing indicator
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                typing: { type: boolean }
+      responses:
+        "200": { description: Broadcast }
+
+  /api/v1/messages/{messageID}:
+    patch:
+      tags: [Messages]
+      summary: Edit a message
+      description: Only the sender, and only within 48 hours of sending.
+      parameters:
+        - name: messageID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+                entities: { type: array, items: { type: object } }
+      responses:
+        "200": { description: Updated }
+        "403": { description: "`MESSAGE_TOO_OLD_TO_EDIT` or not the sender" }
+
+    delete:
+      tags: [Messages]
+      summary: Delete a message
+      description: |
+        Soft delete: the row survives as a tombstone so the chat's sequence
+        stays contiguous and other devices can reconcile the removal.
+      parameters:
+        - name: messageID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Deleted (idempotent) }
+
+  /api/v1/messages/{messageID}/reactions:
+    post:
+      tags: [Messages]
+      summary: Toggle a reaction
+      description: Sending the same emoji twice removes it.
+      parameters:
+        - name: messageID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji: { type: string }
+      responses:
+        "200": { description: Reaction toggled }
+
+  /api/v1/sync:
+    get:
+      tags: [Sync]
+      summary: Fetch missed events
+      description: |
+        The REST form of `sync.request`. Returns durable events after `cursor`
+        plus the current head, so a client that has been offline can catch up
+        before opening a socket.
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: integer, format: int64, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 200, maximum: 500 }
+      responses:
+        "200":
+          description: Events and the server head
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          events:
+                            type: array
+                            items: { $ref: "#/components/schemas/SyncEvent" }
+                          server_seq: { type: integer, format: int64 }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Missing, expired or revoked token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    ValidationFailed:
+      description: The request body failed validation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    Unavailable:
+      description: A dependency is temporarily unavailable
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+
+  schemas:
+    Envelope:
+      type: object
+      description: The single response shape used by every endpoint (§66).
+      required: [success]
+      properties:
+        success: { type: boolean }
+        data: { description: Present when `success` is true }
+        error: { $ref: "#/components/schemas/ErrorBody" }
+        meta: { $ref: "#/components/schemas/Meta" }
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable identifier; switch on this, not the message.
+          examples: ["INVALID_OTP", "CHAT_PERMISSION_DENIED", "RATE_LIMITED"]
+        message: { type: string }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+          description: Per-field validation detail.
+
+    Meta:
+      type: object
+      properties:
+        next_cursor: { type: string }
+        prev_cursor: { type: string }
+        has_more: { type: boolean }
+        total: { type: integer, format: int64 }
+        request_id: { type: string }
+
+    FeatureFlag:
+      type: object
+      properties:
+        key: { type: string }
+        enabled: { type: boolean }
+        rollout_percent: { type: integer }
+        description: { type: string }
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, const: Bearer }
+        expires_at: { type: string, format: date-time }
+        expires_in: { type: integer }
+        user_id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        is_new_account: { type: boolean }
+
+    Session:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        user_agent: { type: string }
+        ip: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        is_current: { type: boolean }
+
+    Chat:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [private, group, channel, secret] }
+        title: { type: string }
+        description: { type: string }
+        username: { type: string }
+        last_seq: { type: integer, format: int64 }
+        last_message_at: { type: string, format: date-time }
+        member_count: { type: integer }
+        is_public: { type: boolean }
+        membership: { $ref: "#/components/schemas/Membership" }
+
+    Membership:
+      type: object
+      properties:
+        role: { type: string, enum: [owner, admin, moderator, member, restricted] }
+        permissions: { type: object, additionalProperties: { type: boolean } }
+        last_read_seq: { type: integer, format: int64 }
+        unread_count: { type: integer }
+        mention_count: { type: integer }
+        is_pinned: { type: boolean }
+        is_archived: { type: boolean }
+        muted_until: { type: string, format: date-time }
+        draft: { type: string }
+
+    SendMessageRequest:
+      type: object
+      required: [client_message_id]
+      properties:
+        client_message_id:
+          type: string
+          format: uuid
+          description: Client-generated idempotency key. Required.
+        type:
+          type: string
+          default: text
+          enum: [text, image, video, audio, voice, file, location, contact, sticker, gif, poll, call]
+        content: { type: string, maxLength: 8000 }
+        entities: { type: array, items: { type: object } }
+        payload: { type: object }
+        reply_to_id: { type: string, format: uuid }
+        attachments:
+          type: array
+          maxItems: 10
+          items: { $ref: "#/components/schemas/Attachment" }
+        mentions:
+          type: array
+          maxItems: 50
+          items: { type: string, format: uuid }
+        is_silent: { type: boolean }
+
+    Attachment:
+      type: object
+      required: [media_id]
+      properties:
+        media_id: { type: string, format: uuid }
+        position: { type: integer }
+        caption: { type: string, maxLength: 2000 }
+
+    Message:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        seq:
+          type: integer
+          format: int64
+          description: Position in the chat's monotonic sequence; drives ordering and sync.
+        sender_id: { type: string, format: uuid }
+        client_message_id: { type: string, format: uuid }
+        type: { type: string }
+        content: { type: string }
+        entities: { type: array, items: { type: object } }
+        payload: { type: object }
+        reply_to_id: { type: string, format: uuid }
+        forward_from: { type: object }
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/Attachment" }
+        reactions:
+          type: array
+          items:
+            type: object
+            properties:
+              emoji: { type: string }
+              count: { type: integer }
+              by_me: { type: boolean }
+        is_pinned: { type: boolean }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time }
+
+    SyncEvent:
+      type: object
+      properties:
+        seq: { type: integer, format: int64 }
+        type:
+          type: string
+          examples: ["message.new", "message.edited", "message.deleted"]
+        payload: { type: object }
+        created_at: { type: string, format: date-time }
