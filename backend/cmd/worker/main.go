@@ -20,7 +20,9 @@ import (
 	"github.com/sobh/messenger/backend/internal/logging"
 	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
+	"github.com/sobh/messenger/backend/internal/notifications"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/search"
 	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/worker"
 )
@@ -65,8 +67,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	notificationsRepo := notifications.NewRepository(db)
+	searchClient := search.New(cfg.Search)
+
 	runner := worker.New(db, cacheClient, messageBus, storageClient,
-		messaging.NewRepository(db), media.NewRepository(db), cfg, metrics, logger)
+		messaging.NewRepository(db), media.NewRepository(db),
+		notificationsRepo, notifications.NewService(notificationsRepo, messageBus),
+		searchClient, cfg, metrics, logger)
 	if err := runner.Start(ctx); err != nil {
 		logger.Error("worker failed to start", slog.Any("error", err))
 		os.Exit(1)

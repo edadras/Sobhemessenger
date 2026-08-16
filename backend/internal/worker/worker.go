@@ -16,7 +16,9 @@ import (
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
+	"github.com/sobh/messenger/backend/internal/notifications"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/search"
 	"github.com/sobh/messenger/backend/internal/storage"
 )
 
@@ -29,9 +31,15 @@ type Runner struct {
 	messaging *messaging.Repository
 	mediaRepo *media.Repository
 	scanner   media.Scanner
-	cfg       *config.Config
-	metrics   *observability.Metrics
-	logger    *slog.Logger
+	search    *search.Client
+
+	notificationsRepo *notifications.Repository
+	notificationsSvc  *notifications.Service
+	pushSenders       map[string]notifications.Sender
+
+	cfg     *config.Config
+	metrics *observability.Metrics
+	logger  *slog.Logger
 
 	stop chan struct{}
 	done chan struct{}
@@ -44,6 +52,9 @@ func New(
 	storageClient *storage.Client,
 	messagingRepo *messaging.Repository,
 	mediaRepo *media.Repository,
+	notificationsRepo *notifications.Repository,
+	notificationsSvc *notifications.Service,
+	searchClient *search.Client,
 	cfg *config.Config,
 	metrics *observability.Metrics,
 	logger *slog.Logger,
@@ -52,7 +63,13 @@ func New(
 		db: db, cache: cacheClient, bus: messageBus, storage: storageClient,
 		messaging: messagingRepo, mediaRepo: mediaRepo,
 		scanner: media.NewScanner(cfg.Media.ClamAVAddr),
-		cfg:     cfg, metrics: metrics, logger: logger,
+		search:  searchClient,
+
+		notificationsRepo: notificationsRepo,
+		notificationsSvc:  notificationsSvc,
+		pushSenders:       notifications.NewSenders(cfg.Push),
+
+		cfg: cfg, metrics: metrics, logger: logger,
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 }
@@ -66,7 +83,9 @@ func (r *Runner) Start(ctx context.Context) error {
 		handler bus.JobHandler
 	}{
 		{bus.SubjectJobMediaProcess, "media-process", 3, r.handleMediaProcess},
-		{bus.SubjectJobSearchIndex, "search-index", 5, r.handleSearchIndex},
+		{bus.SubjectJobPushSend, "push-send", 4, r.handlePushSend},
+		{bus.SubjectJobNewsPublish, "news-publish", 3, r.handleNewsPublish},
+		{bus.SubjectJobSearchIndex, "search-index", 5, r.handleSearchIndexing},
 		{bus.SubjectJobAnalytics, "analytics", 3, r.handleAnalytics},
 		{bus.SubjectJobCleanup, "maintenance", 2, r.handleCleanup},
 	}
@@ -207,30 +226,6 @@ func (r *Runner) publishScheduledArticles(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
-}
-
-// handleSearchIndex forwards a document to the search index. The indexer is
-// the search module's responsibility; the worker only guarantees delivery.
-func (r *Runner) handleSearchIndex(ctx context.Context, job bus.Job) error {
-	var payload struct {
-		Index      string          `json:"index"`
-		DocumentID string          `json:"document_id"`
-		Document   json.RawMessage `json:"document"`
-		Delete     bool            `json:"delete"`
-	}
-	if err := json.Unmarshal(job.Payload, &payload); err != nil {
-		return fmt.Errorf("worker: decode search job: %w", err)
-	}
-	if !r.cfg.Search.Enabled {
-		// Search is switched off for this deployment; acknowledge and move on.
-		return nil
-	}
-
-	r.logger.Debug("search index job",
-		slog.String("index", payload.Index),
-		slog.String("document_id", payload.DocumentID),
-		slog.Bool("delete", payload.Delete))
-	return nil
 }
 
 // handleAnalytics folds a counter into the daily aggregate. Nothing here ever

@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sobh/messenger/backend/internal/admin"
 	"github.com/sobh/messenger/backend/internal/auth"
 	"github.com/sobh/messenger/backend/internal/bus"
 	"github.com/sobh/messenger/backend/internal/cache"
@@ -32,11 +33,14 @@ import (
 	"github.com/sobh/messenger/backend/internal/httpx"
 	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
+	"github.com/sobh/messenger/backend/internal/news"
+	"github.com/sobh/messenger/backend/internal/notifications"
 	"github.com/sobh/messenger/backend/internal/observability"
 	"github.com/sobh/messenger/backend/internal/polls"
 	"github.com/sobh/messenger/backend/internal/presence"
 	"github.com/sobh/messenger/backend/internal/ratelimit"
 	"github.com/sobh/messenger/backend/internal/realtime"
+	"github.com/sobh/messenger/backend/internal/search"
 	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/stories"
 )
@@ -52,18 +56,22 @@ type App struct {
 	Bus     *bus.Bus
 	Storage *storage.Client
 
-	Auth        *auth.Service
-	AuthRepo    *auth.Repository
-	Messaging   *messaging.Service
-	Media       *media.Service
-	Groups      *groups.Service
-	Communities *communities.Service
-	Stories     *stories.Service
-	Polls       *polls.Service
-	Calls       *calls.Service
-	Presence    *presence.Service
-	Flags       *featureflags.Service
-	Hub         *realtime.Hub
+	Auth          *auth.Service
+	AuthRepo      *auth.Repository
+	Messaging     *messaging.Service
+	Media         *media.Service
+	Groups        *groups.Service
+	Communities   *communities.Service
+	Stories       *stories.Service
+	Polls         *polls.Service
+	Calls         *calls.Service
+	News          *news.Service
+	Notifications *notifications.Service
+	Search        *search.Service
+	Admin         *admin.Service
+	Presence      *presence.Service
+	Flags         *featureflags.Service
+	Hub           *realtime.Hub
 
 	httpServer    *http.Server
 	metricsServer *http.Server
@@ -142,6 +150,23 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 	callsService := calls.NewService(calls.NewRepository(db), messagingRepo,
 		messageBus, cfg.Calls, logger)
 
+	newsService := news.NewService(news.NewRepository(db), messageBus, logger)
+
+	notificationsService := notifications.NewService(notifications.NewRepository(db), messageBus)
+
+	searchClient := search.New(cfg.Search)
+	if err := searchClient.EnsureIndices(ctx); err != nil {
+		// A search cluster that is not ready must not stop the messenger from
+		// starting; queries degrade to empty results until it recovers.
+		logger.Warn("could not prepare search indices", slog.Any("error", err))
+	}
+	searchService := search.NewService(searchClient, db, limiter, rules, logger)
+
+	// The admin module drops cached auth state after a ban or role change; it
+	// receives the invalidator as a function so it does not depend on auth.
+	adminService := admin.NewService(admin.NewRepository(db), flags,
+		authMiddleware.InvalidateUserCache, logger)
+
 	hub := realtime.NewHub(cfg.NodeID, messageBus, metrics, logger)
 
 	app := &App{
@@ -150,6 +175,8 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*App, er
 		Auth: authService, AuthRepo: authRepo, Messaging: messagingService,
 		Media: mediaService, Groups: groupsService, Communities: communitiesService,
 		Stories: storiesService, Polls: pollsService, Calls: callsService,
+		News: newsService, Notifications: notificationsService, Search: searchService,
+		Admin:    adminService,
 		Presence: presenceService, Flags: flags, Hub: hub,
 	}
 
@@ -206,6 +233,10 @@ func (a *App) buildRouter(
 	storiesHandler := stories.NewHandler(a.Stories)
 	pollsHandler := polls.NewHandler(a.Polls)
 	callsHandler := calls.NewHandler(a.Calls)
+	newsHandler := news.NewHandler(a.News)
+	notificationsHandler := notifications.NewHandler(a.Notifications)
+	searchHandler := search.NewHandler(a.Search)
+	adminHandler := admin.NewHandler(a.Admin, authMiddleware.RequirePermission)
 	flagsHandler := featureflags.NewHandler(a.Flags)
 
 	wsHandler := realtime.NewHandler(a.Hub, authMiddleware, a.AuthRepo,
@@ -219,6 +250,13 @@ func (a *App) buildRouter(
 
 		api.Mount("/auth", authHandler.Routes())
 		api.Get("/feature-flags", flagsHandler.List)
+
+		// The news feed is readable without an account; OptionalAuth fills in
+		// bookmark and follow state for readers who do have one (§25).
+		api.Group(func(public chi.Router) {
+			public.Use(authMiddleware.OptionalAuth)
+			public.Mount("/news", newsHandler.PublicRoutes())
+		})
 
 		api.Group(func(private chi.Router) {
 			private.Use(authMiddleware.RequireAuth)
@@ -235,6 +273,23 @@ func (a *App) buildRouter(
 			private.Mount("/stories", storiesHandler.Routes())
 			private.Mount("/polls", pollsHandler.Routes())
 			private.Mount("/calls", callsHandler.Routes())
+			private.Mount("/news-reader", newsHandler.ReaderRoutes())
+			private.Mount("/notifications", notificationsHandler.Routes())
+			private.Mount("/search", searchHandler.Routes())
+			private.Mount("/reports", adminHandler.ReportRoutes())
+
+			// Every admin route carries its own permission check; users.read is
+			// the floor for reaching the surface at all (§32).
+			private.Group(func(operator chi.Router) {
+				operator.Use(authMiddleware.RequirePermission(admin.PermUsersRead))
+				operator.Mount("/admin", adminHandler.Routes())
+				operator.Mount("/admin/search", searchHandler.AdminRoutes())
+			})
+
+			private.Group(func(editorial chi.Router) {
+				editorial.Use(authMiddleware.RequirePermission(news.PermRead))
+				editorial.Mount("/editorial", newsHandler.EditorialRoutes())
+			})
 		})
 	})
 
