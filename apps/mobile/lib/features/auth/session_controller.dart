@@ -14,7 +14,8 @@ final Provider<AppConfig> appConfigProvider =
 final Provider<TokenStore> tokenStoreProvider =
     Provider<TokenStore>((Ref ref) => TokenStore());
 
-final Provider<LocalDatabase> localDatabaseProvider = Provider<LocalDatabase>((Ref ref) {
+final Provider<LocalDatabase> localDatabaseProvider =
+    Provider<LocalDatabase>((Ref ref) {
   final LocalDatabase database = LocalDatabase();
   ref.onDispose(database.close);
   return database;
@@ -29,7 +30,8 @@ final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((Ref ref) {
   return client;
 });
 
-final Provider<SocketClient> socketClientProvider = Provider<SocketClient>((Ref ref) {
+final Provider<SocketClient> socketClientProvider =
+    Provider<SocketClient>((Ref ref) {
   final SocketClient client = SocketClient(
     config: ref.watch(appConfigProvider),
     tokenStore: ref.watch(tokenStoreProvider),
@@ -162,11 +164,15 @@ class SessionController extends AsyncNotifier<SessionState> {
   }
 }
 
-final AsyncNotifierProvider<SessionController, SessionState> sessionControllerAsyncProvider =
-    AsyncNotifierProvider<SessionController, SessionState>(SessionController.new);
+final AsyncNotifierProvider<SessionController, SessionState>
+    sessionControllerAsyncProvider =
+    AsyncNotifierProvider<SessionController, SessionState>(
+  SessionController.new,
+);
 
 /// Synchronous view of the session for the router, which cannot await.
-final Provider<SessionState> sessionControllerProvider = Provider<SessionState>((Ref ref) {
+final Provider<SessionState> sessionControllerProvider =
+    Provider<SessionState>((Ref ref) {
   return ref.watch(sessionControllerAsyncProvider).maybeWhen(
         data: (SessionState state) => state,
         orElse: () => const SessionState(),

@@ -8,7 +8,13 @@ import '../config/app_config.dart';
 import '../storage/token_store.dart';
 
 /// Connection state surfaced to the UI (§8).
-enum SocketStatus { disconnected, connecting, connected, syncing, waitingForNetwork }
+enum SocketStatus {
+  disconnected,
+  connecting,
+  connected,
+  syncing,
+  waitingForNetwork
+}
 
 /// One frame of the SOBH WebSocket protocol.
 class SocketFrame {
@@ -24,10 +30,12 @@ class SocketFrame {
   factory SocketFrame.fromJson(Map<String, dynamic> json) => SocketFrame(
         id: json['id'] as String?,
         event: json['event'] as String? ?? '',
-        payload: (json['payload'] as Map<String, dynamic>?) ?? const <String, dynamic>{},
+        payload: (json['payload'] as Map<String, dynamic>?) ??
+            const <String, dynamic>{},
         syncSeq: (json['sync_seq'] as num?)?.toInt(),
         errorCode: (json['error'] as Map<String, dynamic>?)?['code'] as String?,
-        errorMessage: (json['error'] as Map<String, dynamic>?)?['message'] as String?,
+        errorMessage:
+            (json['error'] as Map<String, dynamic>?)?['message'] as String?,
       );
 
   final String? id;
@@ -82,11 +90,14 @@ class SocketClient {
   bool _intentionallyClosed = false;
 
   /// Correlates a sent frame with its acknowledgement.
-  final Map<String, Completer<SocketFrame>> _pending = <String, Completer<SocketFrame>>{};
+  final Map<String, Completer<SocketFrame>> _pending =
+      <String, Completer<SocketFrame>>{};
   int _requestCounter = 0;
 
-  final StreamController<SocketFrame> _events = StreamController<SocketFrame>.broadcast();
-  final StreamController<SocketStatus> _status = StreamController<SocketStatus>.broadcast();
+  final StreamController<SocketFrame> _events =
+      StreamController<SocketFrame>.broadcast();
+  final StreamController<SocketStatus> _status =
+      StreamController<SocketStatus>.broadcast();
 
   /// Server-initiated events. Acknowledgements are routed to their caller and
   /// never appear here.
@@ -162,7 +173,9 @@ class SocketClient {
     if (frame.event == 'connected') {
       syncCursor = (frame.payload['sync_cursor'] as num?)?.toInt() ?? 0;
       serverSeq = (frame.payload['server_seq'] as num?)?.toInt() ?? 0;
-      _setStatus(syncCursor < serverSeq ? SocketStatus.syncing : SocketStatus.connected);
+      _setStatus(
+        syncCursor < serverSeq ? SocketStatus.syncing : SocketStatus.connected,
+      );
       _events.add(frame);
       return;
     }
@@ -174,7 +187,10 @@ class SocketClient {
       if (completer != null && !completer.isCompleted) {
         if (frame.isError) {
           completer.completeError(
-            SocketException(frame.errorCode!, frame.errorMessage ?? 'Request failed'),
+            SocketException(
+              frame.errorCode!,
+              frame.errorMessage ?? 'Request failed',
+            ),
           );
         } else {
           completer.complete(frame);
@@ -191,21 +207,32 @@ class SocketClient {
     final WebSocketChannel? channel = _channel;
     if (channel == null || _currentStatus == SocketStatus.disconnected) {
       return Future<SocketFrame>.error(
-        const SocketException('NOT_CONNECTED', 'The realtime connection is not open'),
+        const SocketException(
+          'NOT_CONNECTED',
+          'The realtime connection is not open',
+        ),
       );
     }
 
-    final String id = '${DateTime.now().microsecondsSinceEpoch}-${_requestCounter++}';
+    final String id =
+        '${DateTime.now().microsecondsSinceEpoch}-${_requestCounter++}';
     final Completer<SocketFrame> completer = Completer<SocketFrame>();
     _pending[id] = completer;
 
-    channel.sink.add(jsonEncode(SocketFrame(id: id, event: event, payload: payload).toJson()));
+    channel.sink.add(
+      jsonEncode(
+        SocketFrame(id: id, event: event, payload: payload).toJson(),
+      ),
+    );
 
     return completer.future.timeout(
       _requestTimeout,
       onTimeout: () {
         _pending.remove(id);
-        throw const SocketException('TIMEOUT', 'The server did not acknowledge in time');
+        throw const SocketException(
+          'TIMEOUT',
+          'The server did not acknowledge in time',
+        );
       },
     );
   }
@@ -213,12 +240,15 @@ class SocketClient {
   /// Sends a frame without waiting — typing indicators and sync acks, where a
   /// lost frame costs nothing.
   void send(String event, Map<String, dynamic> payload) {
-    _channel?.sink.add(jsonEncode(SocketFrame(event: event, payload: payload).toJson()));
+    _channel?.sink
+        .add(jsonEncode(SocketFrame(event: event, payload: payload).toJson()));
   }
 
   /// Requests missed events after [cursor] (§9).
-  Future<SocketFrame> requestSync(int cursor, {int limit = 200}) =>
-      request('sync.request', <String, dynamic>{'cursor': cursor, 'limit': limit});
+  Future<SocketFrame> requestSync(int cursor, {int limit = 200}) => request(
+        'sync.request',
+        <String, dynamic>{'cursor': cursor, 'limit': limit},
+      );
 
   /// Confirms events up to [cursor] have been applied. Until this is sent the
   /// server will redeliver them, which is what makes a crash mid-apply safe.
@@ -254,7 +284,10 @@ class SocketClient {
     for (final Completer<SocketFrame> completer in _pending.values) {
       if (!completer.isCompleted) {
         completer.completeError(
-          const SocketException('DISCONNECTED', 'The connection closed before a reply arrived'),
+          const SocketException(
+            'DISCONNECTED',
+            'The connection closed before a reply arrived',
+          ),
         );
       }
     }
@@ -283,7 +316,8 @@ class SocketClient {
 
   /// `min(60s, 1s * 2^attempt)` with ±50% jitter.
   Duration _backoffDelay(int attempt) {
-    final int exponential = _minBackoff.inMilliseconds * (1 << attempt.clamp(0, 6));
+    final int exponential =
+        _minBackoff.inMilliseconds * (1 << attempt.clamp(0, 6));
     final int capped = min(exponential, _maxBackoff.inMilliseconds);
     final double jitter = 0.5 + Random().nextDouble();
     return Duration(milliseconds: (capped * jitter).round());

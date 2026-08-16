@@ -72,12 +72,18 @@ go run ./cmd/api
 
 ```bash
 cd backend
-go test ./...                                    # unit tests only
-SOBH_TEST_POSTGRES_DSN=postgres://… go test ./...  # + integration tests
+go test ./...                                      # unit tests only
+SOBH_TEST_POSTGRES_DSN=postgres://… go test ./...  # + integration and end-to-end
+
+cd ../apps/mobile
+flutter gen-l10n && dart run build_runner build --delete-conflicting-outputs
+flutter analyze --fatal-infos && flutter test
 ```
 
 Integration tests skip themselves when `SOBH_TEST_POSTGRES_DSN` is unset, so the
-default run needs no database.
+default run needs no database. The end-to-end suite additionally starts an
+in-process NATS server and an in-memory Redis, so it needs nothing else
+installed. Set `SOBH_TEST_LOG=1` to see the server's own logs while a test runs.
 
 ---
 
@@ -144,22 +150,36 @@ tests.
 | **Background work** | Durable job consumers with backoff and poison-message handling, media processing, push delivery, search indexing, and maintenance (OTP expiry, event-log pruning, story expiry, abandoned uploads, scheduled publishing). |
 | **Infrastructure** | Docker Compose dev stack, distroless image, nginx edge config, Prometheus alerts derived from the §79 targets, Grafana provisioning, Kubernetes manifests with PDB/HPA/NetworkPolicy and backup CronJobs, encrypted backup and verified restore scripts, CI with lint, tests, reversible-migration check and image scanning. |
 | **Protocol** | OpenAPI 3.1 for the implemented surface and a full WebSocket protocol document. |
-| **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox, sign-in and chat screens. |
+| **Contacts** | Discovery by HMAC digest under a server-published pepper — a phone number never leaves the device — with full and incremental sync, favourites, blocking in both directions, and privacy resolved per viewer in SQL. |
+| **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. |
+| **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats, contacts, groups and channels with member administration, invite links and join requests, stories with a viewer, calls, the news feed with articles and bookmarks, search, profile and settings. |
+
+### Verified, not asserted
+
+The end-to-end suite assembles the production router against a real
+PostgreSQL, a real Redis protocol implementation and an in-process NATS with
+JetStream, then signs in over HTTP, opens a chat, sends over a WebSocket and
+resumes from a cursor. Measured on one process against the §79 budgets:
+
+| Path | Measured p95 | Budget |
+|---|---|---|
+| Message send (HTTP) | 57 ms | 200 ms |
+| Send ack (WebSocket) | 4 ms | 300 ms |
+| Delivery to recipient | 4 ms | 500 ms |
+
+The budgets are asserted, so a regression fails the build rather than shipping.
 
 ### Not yet built
 
-- **Mobile feature screens** — groups, channels, communities, stories, calls,
-  news and settings have complete, documented APIs but no Flutter UI yet.
-- **Contact sync (§54)** — the privacy-preserving design is in place
-  (`users.phone_hash` is an HMAC under a server-side pepper); the batch
-  matching endpoint is not written.
-- **Secret chats (§24)** — key-exchange tables, prekey storage and ciphertext
-  columns exist. The X3DH and Double Ratchet implementation belongs on the
-  device and is not written.
-- **End-to-end integration (§21)** — every module is tested against a real
-  PostgreSQL, but the full stack has not been brought up together and exercised.
-- **Load testing (§22)** — the k6 harness implements the §78 ramp with
-  thresholds that fail on a missed §79 target; it has not been run.
+- **Media in the mobile UI** — the upload, variant and playback APIs are
+  complete and tested, but the Flutter screens send and render text only.
+- **The call screen** — signalling, ICE servers and history are wired; the
+  WebRTC peer connection and its UI are not.
+- **Composing stories** — the viewer and tray are built and the create
+  endpoint exists; there is no capture screen.
+- **Load testing at scale (§22)** — the k6 harness implements the §78 ramp to
+  500k against a deployed cluster and has not been run there. What is measured
+  above is a single process, which bounds latency but not capacity.
 
 `docs/architecture/roadmap.md` carries the per-stage detail.
 

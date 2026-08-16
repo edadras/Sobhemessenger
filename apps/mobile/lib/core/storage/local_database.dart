@@ -46,7 +46,8 @@ class Chats extends Table {
 class Messages extends Table {
   /// Server id once acknowledged; before that, the client message id.
   TextColumn get id => text()();
-  TextColumn get chatId => text().references(Chats, #id, onDelete: KeyAction.cascade)();
+  TextColumn get chatId =>
+      text().references(Chats, #id, onDelete: KeyAction.cascade)();
 
   /// Server sequence. Null while the message is still in the outbox — it has no
   /// position in the chat until the server assigns one.
@@ -141,7 +142,9 @@ class SyncState extends Table {
   Set<Column<Object>> get primaryKey => <Column<Object>>{id};
 }
 
-@DriftDatabase(tables: <Type>[Chats, Messages, Outbox, Users, MediaCache, SyncState])
+@DriftDatabase(
+  tables: <Type>[Chats, Messages, Outbox, Users, MediaCache, SyncState],
+)
 class LocalDatabase extends _$LocalDatabase {
   LocalDatabase() : super(_open());
 
@@ -169,8 +172,12 @@ class LocalDatabase extends _$LocalDatabase {
   Stream<List<ChatRow>> watchChats() {
     return (select(chats)
           ..orderBy(<OrderClauseGenerator<$ChatsTable>>[
-            (t) => OrderingTerm(expression: t.isPinned, mode: OrderingMode.desc),
-            (t) => OrderingTerm(expression: t.lastMessageAt, mode: OrderingMode.desc),
+            (t) =>
+                OrderingTerm(expression: t.isPinned, mode: OrderingMode.desc),
+            (t) => OrderingTerm(
+                  expression: t.lastMessageAt,
+                  mode: OrderingMode.desc,
+                ),
           ]))
         .watch();
   }
@@ -181,7 +188,8 @@ class LocalDatabase extends _$LocalDatabase {
     return (select(messages)
           ..where(($MessagesTable t) => t.chatId.equals(chatId))
           ..orderBy(<OrderClauseGenerator<$MessagesTable>>[
-            (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
+            (t) =>
+                OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
           ])
           ..limit(limit))
         .watch()
@@ -196,7 +204,9 @@ class LocalDatabase extends _$LocalDatabase {
 
   Future<void> markMessageStatus(String clientMessageId, MessageStatus status) {
     return (update(messages)
-          ..where(($MessagesTable t) => t.clientMessageId.equals(clientMessageId)))
+          ..where(
+            ($MessagesTable t) => t.clientMessageId.equals(clientMessageId),
+          ))
         .write(MessagesCompanion(status: Value<MessageStatus>(status)));
   }
 
@@ -210,7 +220,9 @@ class LocalDatabase extends _$LocalDatabase {
   }) async {
     await transaction(() async {
       await (update(messages)
-            ..where(($MessagesTable t) => t.clientMessageId.equals(clientMessageId)))
+            ..where(
+              ($MessagesTable t) => t.clientMessageId.equals(clientMessageId),
+            ))
           .write(
         MessagesCompanion(
           id: Value<String>(serverId),
@@ -220,7 +232,9 @@ class LocalDatabase extends _$LocalDatabase {
         ),
       );
       await (delete(outbox)
-            ..where(($OutboxTable t) => t.clientMessageId.equals(clientMessageId)))
+            ..where(
+              ($OutboxTable t) => t.clientMessageId.equals(clientMessageId),
+            ))
           .go();
     });
   }
@@ -228,22 +242,31 @@ class LocalDatabase extends _$LocalDatabase {
   /// Queued operations that are due for another attempt.
   Future<List<OutboxRow>> dueOutboxEntries({int limit = 20}) {
     return (select(outbox)
-          ..where(($OutboxTable t) => t.nextAttemptAt.isSmallerOrEqualValue(DateTime.now()))
+          ..where(
+            ($OutboxTable t) =>
+                t.nextAttemptAt.isSmallerOrEqualValue(DateTime.now()),
+          )
           ..orderBy(<OrderClauseGenerator<$OutboxTable>>[
             (t) => OrderingTerm(expression: t.createdAt),
           ])
           ..limit(limit))
         .get();
-    }
+  }
 
   Future<void> enqueue(OutboxCompanion entry) =>
       into(outbox).insertOnConflictUpdate(entry);
 
   /// Records a failed attempt and schedules the next one with backoff.
-  Future<void> deferOutboxEntry(String clientMessageId, int attempts, String error) {
+  Future<void> deferOutboxEntry(
+    String clientMessageId,
+    int attempts,
+    String error,
+  ) {
     final Duration delay = Duration(seconds: 1 << attempts.clamp(0, 8));
     return (update(outbox)
-          ..where(($OutboxTable t) => t.clientMessageId.equals(clientMessageId)))
+          ..where(
+            ($OutboxTable t) => t.clientMessageId.equals(clientMessageId),
+          ))
         .write(
       OutboxCompanion(
         attempts: Value<int>(attempts),
@@ -253,14 +276,14 @@ class LocalDatabase extends _$LocalDatabase {
     );
   }
 
-  Future<void> removeOutboxEntry(String clientMessageId) =>
-      (delete(outbox)..where(($OutboxTable t) => t.clientMessageId.equals(clientMessageId)))
-          .go();
+  Future<void> removeOutboxEntry(String clientMessageId) => (delete(outbox)
+        ..where(($OutboxTable t) => t.clientMessageId.equals(clientMessageId)))
+      .go();
 
   Future<int> readSyncCursor() async {
-    final SyncStateRow? row =
-        await (select(syncState)..where(($SyncStateTable t) => t.id.equals(1)))
-            .getSingleOrNull();
+    final SyncStateRow? row = await (select(syncState)
+          ..where(($SyncStateTable t) => t.id.equals(1)))
+        .getSingleOrNull();
     return row?.cursor ?? 0;
   }
 
@@ -283,7 +306,8 @@ class LocalDatabase extends _$LocalDatabase {
       await delete(users).go();
       await delete(mediaCache).go();
       await delete(syncState).go();
-      await into(syncState).insert(SyncStateCompanion.insert(id: const Value<int>(1)));
+      await into(syncState)
+          .insert(SyncStateCompanion.insert(id: const Value<int>(1)));
     });
   }
 }

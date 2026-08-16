@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/routing/app_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../session_controller.dart';
 
@@ -43,7 +44,9 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
     });
 
     try {
-      await ref.read(sessionControllerAsyncProvider.notifier).requestCode(phone);
+      await ref
+          .read(sessionControllerAsyncProvider.notifier)
+          .requestCode(phone);
       if (!mounted) {
         return;
       }
@@ -84,13 +87,19 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const SizedBox(height: SobhSpacing.xxxl),
-              Text(l10n.appName, style: text.headlineLarge?.copyWith(color: palette.primary)),
+              Text(
+                l10n.appName,
+                style: text.headlineLarge?.copyWith(color: palette.primary),
+              ),
               const SizedBox(height: SobhSpacing.xxl),
               Text(l10n.authPhoneTitle, style: text.titleLarge),
               const SizedBox(height: SobhSpacing.sm),
-              Text(l10n.authPhoneSubtitle, style: text.bodyMedium?.copyWith(
-                color: palette.textSecondary,
-              )),
+              Text(
+                l10n.authPhoneSubtitle,
+                style: text.bodyMedium?.copyWith(
+                  color: palette.textSecondary,
+                ),
+              ),
               const SizedBox(height: SobhSpacing.xl),
               TextField(
                 controller: _controller,

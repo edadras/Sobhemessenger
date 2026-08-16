@@ -23,9 +23,21 @@
   "authPhoneHint": "0912 345 6789",
   "authCodeTitle": "Verification code",
   "authCodeSubtitle": "Enter the code sent to {phone}",
-  "@authCodeSubtitle": { "placeholders": { "phone": { "type": "String" } } },
+  "@authCodeSubtitle": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "authResendIn": "Resend in {seconds}s",
-  "@authResendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@authResendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "authResend": "Resend code",
   "authPasswordTitle": "Two-step password",
   "authPasswordHint": "Password",
@@ -38,11 +50,23 @@
   "chatTyping": "typing…",
   "chatOnline": "online",
   "chatLastSeen": "last seen {time}",
-  "@chatLastSeen": { "placeholders": { "time": { "type": "String" } } },
+  "@chatLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "chatMessageDeleted": "This message was deleted",
   "chatMessageEdited": "edited",
   "chatUnreadCount": "{count, plural, =0{No new messages} =1{1 new message} other{{count} new messages}}",
-  "@chatUnreadCount": { "placeholders": { "count": { "type": "int" } } },
+  "@chatUnreadCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "chatHoldToRecord": "Hold to record",
   "chatSlideToCancel": "Slide to cancel",
   "statusConnecting": "Connecting…",
@@ -66,5 +90,155 @@
   "settingsStorage": "Storage",
   "privacyEveryone": "Everyone",
   "privacyContacts": "Contacts",
-  "privacyNobody": "Nobody"
+  "privacyNobody": "Nobody",
+  "commonDone": "Done",
+  "commonAdd": "Add",
+  "commonRemove": "Remove",
+  "commonShare": "Share",
+  "commonSeeAll": "See all",
+  "commonYes": "Yes",
+  "commonNo": "No",
+  "navContacts": "Contacts",
+  "contactsTitle": "Contacts",
+  "contactsEmptyTitle": "No contacts yet",
+  "contactsEmptyBody": "Sync your address book to find people you already know",
+  "contactsSync": "Sync contacts",
+  "contactsSyncing": "Syncing your address book…",
+  "contactsSyncPrivacy": "Only irreversible hashes of the numbers leave your device",
+  "contactsSyncResult": "{count, plural, =0{No one from your contacts is on SOBH yet} =1{1 contact found} other{{count} contacts found}}",
+  "@contactsSyncResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsPermissionDenied": "SOBH needs permission to read your contacts",
+  "contactsBlocked": "Blocked users",
+  "contactsBlockedEmpty": "You have not blocked anyone",
+  "contactsBlock": "Block",
+  "contactsUnblock": "Unblock",
+  "contactsFavorite": "Favourite",
+  "contactsMessage": "Message",
+  "groupsCreateTitle": "New group",
+  "channelsCreateTitle": "New channel",
+  "groupsNameHint": "Name",
+  "groupsDescriptionHint": "Description",
+  "groupsPublicLabel": "Public",
+  "groupsPublicHint": "Anyone can find and join it",
+  "groupsUsernameHint": "Public link",
+  "groupsMembers": "{count, plural, =1{1 member} other{{count} members}}",
+  "@groupsMembers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsSubscribers": "{count, plural, =1{1 subscriber} other{{count} subscribers}}",
+  "@groupsSubscribers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsInfoTitle": "Info",
+  "groupsMembersTitle": "Members",
+  "groupsInviteLink": "Invite link",
+  "groupsJoinRequests": "Join requests",
+  "groupsLeave": "Leave",
+  "groupsLeaveConfirm": "Leave this conversation?",
+  "groupsRoleOwner": "Owner",
+  "groupsRoleAdmin": "Admin",
+  "groupsRoleMember": "Member",
+  "groupsDiscover": "Discover",
+  "groupsDiscoverEmpty": "Nothing public to show yet",
+  "groupsJoin": "Join",
+  "groupsJoinPending": "Your request is awaiting approval",
+  "groupsSlowMode": "Slow mode",
+  "groupsApprove": "Approve",
+  "groupsDecline": "Decline",
+  "storiesTitle": "Stories",
+  "storiesEmpty": "No stories right now",
+  "storiesMine": "Your story",
+  "storiesViewers": "{count, plural, =0{No views} =1{1 view} other{{count} views}}",
+  "@storiesViewers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "storiesExpiresIn": "Expires in {time}",
+  "@storiesExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "callsTitle": "Calls",
+  "callsEmpty": "No calls yet",
+  "callsIncoming": "Incoming call",
+  "callsOutgoing": "Outgoing call",
+  "callsMissed": "Missed call",
+  "callsAudio": "Voice call",
+  "callsVideo": "Video call",
+  "callsAnswer": "Answer",
+  "callsDecline": "Decline",
+  "callsEnd": "End",
+  "callsConnecting": "Connecting…",
+  "callsRinging": "Ringing…",
+  "callsDuration": "{duration}",
+  "@callsDuration": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "newsTitle": "News",
+  "newsEmpty": "No articles yet",
+  "newsLatest": "Latest",
+  "newsPopular": "Popular",
+  "newsFollowing": "Following",
+  "newsBreaking": "Breaking",
+  "newsBookmarks": "Saved",
+  "newsBookmarksEmpty": "Nothing saved yet",
+  "newsReadingTime": "{minutes} min read",
+  "@newsReadingTime": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "newsCategories": "Categories",
+  "searchTitle": "Search",
+  "searchHint": "Search messages, people and news",
+  "searchEmpty": "Nothing matched",
+  "searchPrompt": "Type to search",
+  "searchSectionMessages": "Messages",
+  "searchSectionPeople": "People",
+  "searchSectionChats": "Chats",
+  "searchSectionNews": "News",
+  "profileTitle": "Profile",
+  "profileEditName": "Name",
+  "profileUsername": "Username",
+  "profileBio": "Bio",
+  "profileSignOut": "Sign out",
+  "profileSignOutConfirm": "Sign out of this device?",
+  "settingsSessionsCurrent": "This device",
+  "settingsSessionsRevoke": "Sign out",
+  "settingsSessionsRevokeOthers": "Sign out all other devices",
+  "settingsNotificationsMessages": "Messages",
+  "settingsNotificationsGroups": "Groups",
+  "settingsNotificationsChannels": "Channels",
+  "settingsNotificationsPreview": "Show message preview",
+  "settingsNotificationsQuietHours": "Quiet hours",
+  "settingsPrivacyLastSeen": "Last seen",
+  "settingsPrivacyProfilePhoto": "Profile photo",
+  "settingsPrivacyMessages": "Who can message me",
+  "settingsPrivacyCalls": "Who can call me"
 }

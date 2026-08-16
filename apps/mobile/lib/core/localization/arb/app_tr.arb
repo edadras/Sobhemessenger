@@ -23,9 +23,21 @@
   "authPhoneHint": "0912 345 6789",
   "authCodeTitle": "Doğrulama kodu",
   "authCodeSubtitle": "{phone} numarasına gönderilen kodu girin",
-  "@authCodeSubtitle": { "placeholders": { "phone": { "type": "String" } } },
+  "@authCodeSubtitle": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "authResendIn": "{seconds} saniye sonra tekrar gönder",
-  "@authResendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@authResendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "authResend": "Kodu tekrar gönder",
   "authPasswordTitle": "İki adımlı parola",
   "authPasswordHint": "Parola",
@@ -38,11 +50,23 @@
   "chatTyping": "yazıyor…",
   "chatOnline": "çevrimiçi",
   "chatLastSeen": "son görülme {time}",
-  "@chatLastSeen": { "placeholders": { "time": { "type": "String" } } },
+  "@chatLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "chatMessageDeleted": "Bu mesaj silindi",
   "chatMessageEdited": "düzenlendi",
   "chatUnreadCount": "{count, plural, =0{Yeni mesaj yok} =1{1 yeni mesaj} other{{count} yeni mesaj}}",
-  "@chatUnreadCount": { "placeholders": { "count": { "type": "int" } } },
+  "@chatUnreadCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "chatHoldToRecord": "Kaydetmek için basılı tutun",
   "chatSlideToCancel": "İptal için kaydırın",
   "statusConnecting": "Bağlanıyor…",
@@ -66,5 +90,155 @@
   "settingsStorage": "Depolama",
   "privacyEveryone": "Herkes",
   "privacyContacts": "Kişiler",
-  "privacyNobody": "Hiç kimse"
+  "privacyNobody": "Hiç kimse",
+  "commonDone": "Tamam",
+  "commonAdd": "Ekle",
+  "commonRemove": "Kaldır",
+  "commonShare": "Paylaş",
+  "commonSeeAll": "Tümünü gör",
+  "commonYes": "Evet",
+  "commonNo": "Hayır",
+  "navContacts": "Kişiler",
+  "contactsTitle": "Kişiler",
+  "contactsEmptyTitle": "Henüz kişi yok",
+  "contactsEmptyBody": "Tanıdıklarınızı bulmak için rehberinizi eşitleyin",
+  "contactsSync": "Kişileri eşitle",
+  "contactsSyncing": "Rehber eşitleniyor…",
+  "contactsSyncPrivacy": "Cihazınızdan yalnızca numaraların geri döndürülemez özetleri çıkar",
+  "contactsSyncResult": "{count, plural, =0{Kişilerinizden kimse henüz SOBH’ta değil} =1{1 kişi bulundu} other{{count} kişi bulundu}}",
+  "@contactsSyncResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsPermissionDenied": "SOBH kişilerinizi okumak için izne ihtiyaç duyar",
+  "contactsBlocked": "Engellenen kullanıcılar",
+  "contactsBlockedEmpty": "Kimseyi engellemediniz",
+  "contactsBlock": "Engelle",
+  "contactsUnblock": "Engeli kaldır",
+  "contactsFavorite": "Favori",
+  "contactsMessage": "Mesaj",
+  "groupsCreateTitle": "Yeni grup",
+  "channelsCreateTitle": "Yeni kanal",
+  "groupsNameHint": "Ad",
+  "groupsDescriptionHint": "Açıklama",
+  "groupsPublicLabel": "Herkese açık",
+  "groupsPublicHint": "Herkes bulup katılabilir",
+  "groupsUsernameHint": "Herkese açık bağlantı",
+  "groupsMembers": "{count, plural, =1{1 üye} other{{count} üye}}",
+  "@groupsMembers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsSubscribers": "{count, plural, =1{1 abone} other{{count} abone}}",
+  "@groupsSubscribers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsInfoTitle": "Bilgi",
+  "groupsMembersTitle": "Üyeler",
+  "groupsInviteLink": "Davet bağlantısı",
+  "groupsJoinRequests": "Katılma istekleri",
+  "groupsLeave": "Ayrıl",
+  "groupsLeaveConfirm": "Bu sohbetten ayrılınsın mı?",
+  "groupsRoleOwner": "Sahip",
+  "groupsRoleAdmin": "Yönetici",
+  "groupsRoleMember": "Üye",
+  "groupsDiscover": "Keşfet",
+  "groupsDiscoverEmpty": "Gösterilecek herkese açık içerik yok",
+  "groupsJoin": "Katıl",
+  "groupsJoinPending": "İsteğiniz onay bekliyor",
+  "groupsSlowMode": "Yavaş mod",
+  "groupsApprove": "Onayla",
+  "groupsDecline": "Reddet",
+  "storiesTitle": "Hikâyeler",
+  "storiesEmpty": "Şu anda hikâye yok",
+  "storiesMine": "Hikâyen",
+  "storiesViewers": "{count, plural, =0{Görüntülenme yok} =1{1 görüntülenme} other{{count} görüntülenme}}",
+  "@storiesViewers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "storiesExpiresIn": "{time} içinde sona erer",
+  "@storiesExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "callsTitle": "Aramalar",
+  "callsEmpty": "Henüz arama yok",
+  "callsIncoming": "Gelen arama",
+  "callsOutgoing": "Giden arama",
+  "callsMissed": "Cevapsız arama",
+  "callsAudio": "Sesli arama",
+  "callsVideo": "Görüntülü arama",
+  "callsAnswer": "Cevapla",
+  "callsDecline": "Reddet",
+  "callsEnd": "Bitir",
+  "callsConnecting": "Bağlanıyor…",
+  "callsRinging": "Çalıyor…",
+  "callsDuration": "{duration}",
+  "@callsDuration": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "newsTitle": "Haberler",
+  "newsEmpty": "Henüz makale yok",
+  "newsLatest": "En yeni",
+  "newsPopular": "Popüler",
+  "newsFollowing": "Takip edilen",
+  "newsBreaking": "Son dakika",
+  "newsBookmarks": "Kaydedilenler",
+  "newsBookmarksEmpty": "Henüz kayıt yok",
+  "newsReadingTime": "{minutes} dk okuma",
+  "@newsReadingTime": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "newsCategories": "Kategoriler",
+  "searchTitle": "Ara",
+  "searchHint": "Mesaj, kişi ve haber ara",
+  "searchEmpty": "Eşleşme yok",
+  "searchPrompt": "Aramak için yazın",
+  "searchSectionMessages": "Mesajlar",
+  "searchSectionPeople": "Kişiler",
+  "searchSectionChats": "Sohbetler",
+  "searchSectionNews": "Haberler",
+  "profileTitle": "Profil",
+  "profileEditName": "Ad",
+  "profileUsername": "Kullanıcı adı",
+  "profileBio": "Hakkında",
+  "profileSignOut": "Çıkış yap",
+  "profileSignOutConfirm": "Bu cihazdan çıkılsın mı?",
+  "settingsSessionsCurrent": "Bu cihaz",
+  "settingsSessionsRevoke": "Çıkış",
+  "settingsSessionsRevokeOthers": "Diğer tüm cihazlardan çık",
+  "settingsNotificationsMessages": "Mesajlar",
+  "settingsNotificationsGroups": "Gruplar",
+  "settingsNotificationsChannels": "Kanallar",
+  "settingsNotificationsPreview": "Mesaj önizlemesini göster",
+  "settingsNotificationsQuietHours": "Sessiz saatler",
+  "settingsPrivacyLastSeen": "Son görülme",
+  "settingsPrivacyProfilePhoto": "Profil fotoğrafı",
+  "settingsPrivacyMessages": "Bana kim mesaj atabilir",
+  "settingsPrivacyCalls": "Beni kim arayabilir"
 }

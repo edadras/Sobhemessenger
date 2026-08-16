@@ -47,10 +47,22 @@ class _EditorialPageState extends ConsumerState<EditorialPage> {
               const Spacer(),
               SegmentedButton<String>(
                 segments: const <ButtonSegment<String>>[
-                  ButtonSegment<String>(value: 'draft', label: Text('پیش‌نویس')),
-                  ButtonSegment<String>(value: 'review', label: Text('بازبینی')),
-                  ButtonSegment<String>(value: 'scheduled', label: Text('زمان‌بندی')),
-                  ButtonSegment<String>(value: 'published', label: Text('منتشرشده')),
+                  ButtonSegment<String>(
+                    value: 'draft',
+                    label: Text('پیش‌نویس'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'review',
+                    label: Text('بازبینی'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'scheduled',
+                    label: Text('زمان‌بندی'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'published',
+                    label: Text('منتشرشده'),
+                  ),
                 ],
                 selected: <String>{_status},
                 onSelectionChanged: (Set<String> selection) =>
@@ -64,7 +76,8 @@ class _EditorialPageState extends ConsumerState<EditorialPage> {
               key: ValueKey<String>('$_status|$_reloadToken'),
               future: api.editorialArticles(status: _status),
               emptyMessage: 'مطلبی در این وضعیت وجود ندارد',
-              builder: (BuildContext context, List<dynamic> articles) => ListView.separated(
+              builder: (BuildContext context, List<dynamic> articles) =>
+                  ListView.separated(
                 itemCount: articles.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (BuildContext context, int index) {

@@ -43,14 +43,26 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Text('گزارش‌ها', style: Theme.of(context).textTheme.headlineSmall),
+              Text(
+                'گزارش‌ها',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const Spacer(),
               SegmentedButton<String>(
                 segments: const <ButtonSegment<String>>[
                   ButtonSegment<String>(value: 'open', label: Text('باز')),
-                  ButtonSegment<String>(value: 'reviewing', label: Text('در بررسی')),
-                  ButtonSegment<String>(value: 'actioned', label: Text('اقدام‌شده')),
-                  ButtonSegment<String>(value: 'dismissed', label: Text('رد شده')),
+                  ButtonSegment<String>(
+                    value: 'reviewing',
+                    label: Text('در بررسی'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'actioned',
+                    label: Text('اقدام‌شده'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'dismissed',
+                    label: Text('رد شده'),
+                  ),
                 ],
                 selected: <String>{_status},
                 onSelectionChanged: (Set<String> selection) =>
@@ -64,14 +76,17 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
               key: ValueKey<String>('$_status|$_reloadToken'),
               future: api.reports(status: _status),
               emptyMessage: 'گزارشی در این وضعیت وجود ندارد',
-              builder: (BuildContext context, List<dynamic> reports) => ListView.separated(
+              builder: (BuildContext context, List<dynamic> reports) =>
+                  ListView.separated(
                 itemCount: reports.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (BuildContext context, int index) {
-                  final Map<String, dynamic> report = reports[index] as Map<String, dynamic>;
+                  final Map<String, dynamic> report =
+                      reports[index] as Map<String, dynamic>;
                   return ListTile(
                     leading: Icon(_iconFor(report['reason'] as String? ?? '')),
-                    title: Text('${report['target_type']} · ${report['reason']}'),
+                    title:
+                        Text('${report['target_type']} · ${report['reason']}'),
                     subtitle: Text(
                       report['detail'] as String? ?? 'بدون توضیح',
                       maxLines: 2,
@@ -82,13 +97,17 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: <Widget>[
                               TextButton(
-                                onPressed: () =>
-                                    _resolve(report['id'] as String, 'dismissed'),
+                                onPressed: () => _resolve(
+                                  report['id'] as String,
+                                  'dismissed',
+                                ),
                                 child: const Text('رد'),
                               ),
                               FilledButton(
-                                onPressed: () =>
-                                    _resolve(report['id'] as String, 'actioned'),
+                                onPressed: () => _resolve(
+                                  report['id'] as String,
+                                  'actioned',
+                                ),
                                 child: const Text('اقدام'),
                               ),
                             ],

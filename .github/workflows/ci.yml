@@ -180,6 +180,12 @@ jobs:
         working-directory: apps/${{ matrix.app }}
         run: dart run build_runner build --delete-conflicting-outputs
 
+      # Localisations are generated from the ARB files rather than committed,
+      # so an edited translation cannot be silently ignored by a stale copy.
+      - name: Generate localisations
+        working-directory: apps/${{ matrix.app }}
+        run: test -f l10n.yaml && flutter gen-l10n || echo "no l10n.yaml"
+
       - name: Verify formatting
         working-directory: apps/${{ matrix.app }}
         run: dart format --output=none --set-exit-if-changed lib test

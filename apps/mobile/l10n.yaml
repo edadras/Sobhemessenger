@@ -3,3 +3,7 @@ template-arb-file: app_fa.arb
 output-localization-file: app_localizations.dart
 output-class: AppLocalizations
 nullable-getter: false
+# The generated file is committed under lib/ and imported by path, rather than
+# through the deprecated synthetic flutter_gen package.
+synthetic-package: false
+output-dir: lib/core/localization/generated

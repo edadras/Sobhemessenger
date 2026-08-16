@@ -28,3 +28,9 @@ apps/*/.idea/
 # Local data
 pgdata/
 *.log
+
+# Generated Dart part files. CI regenerates them with build_runner, and the
+# localizations with gen-l10n, so committing them would only create conflicts.
+*.g.dart
+*.freezed.dart
+apps/*/lib/core/localization/generated/

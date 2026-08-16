@@ -45,8 +45,11 @@ class AdminApi {
   }
 
   Future<void> setUserStatus(String userId, String status, String reason) =>
-      _send('/admin/users/$userId/status', 'PUT',
-          <String, String>{'status': status, 'reason': reason});
+      _send(
+        '/admin/users/$userId/status',
+        'PUT',
+        <String, String>{'status': status, 'reason': reason},
+      );
 
   Future<List<dynamic>> reports({String status = 'open'}) async {
     final Map<String, dynamic> data =
@@ -54,9 +57,16 @@ class AdminApi {
     return data['reports'] as List<dynamic>? ?? const <dynamic>[];
   }
 
-  Future<void> resolveReport(String reportId, String status, String resolution) =>
-      _send('/admin/reports/$reportId', 'PUT',
-          <String, String>{'status': status, 'resolution': resolution});
+  Future<void> resolveReport(
+    String reportId,
+    String status,
+    String resolution,
+  ) =>
+      _send(
+        '/admin/reports/$reportId',
+        'PUT',
+        <String, String>{'status': status, 'resolution': resolution},
+      );
 
   Future<List<dynamic>> featureFlags() async {
     final Map<String, dynamic> data =
@@ -64,9 +74,11 @@ class AdminApi {
     return data['flags'] as List<dynamic>? ?? const <dynamic>[];
   }
 
-  Future<void> setFeatureFlag(String key, bool enabled, int rollout) =>
-      _send('/admin/feature-flags/$key', 'PUT',
-          <String, dynamic>{'enabled': enabled, 'rollout_percent': rollout});
+  Future<void> setFeatureFlag(String key, bool enabled, int rollout) => _send(
+        '/admin/feature-flags/$key',
+        'PUT',
+        <String, dynamic>{'enabled': enabled, 'rollout_percent': rollout},
+      );
 
   Future<List<dynamic>> auditLog({String action = ''}) async {
     final Map<String, dynamic> data = await _get<Map<String, dynamic>>(
@@ -82,12 +94,15 @@ class AdminApi {
     return data['articles'] as List<dynamic>? ?? const <dynamic>[];
   }
 
-  Future<void> setArticleStatus(String articleId, String status) =>
-      _send('/editorial/articles/$articleId/status', 'POST',
-          <String, String>{'status': status});
+  Future<void> setArticleStatus(String articleId, String status) => _send(
+        '/editorial/articles/$articleId/status',
+        'POST',
+        <String, String>{'status': status},
+      );
 
   Future<T> _get<T>(String path) async {
-    final Response<dynamic> response = await _dio.get<dynamic>(path, options: _options);
+    final Response<dynamic> response =
+        await _dio.get<dynamic>(path, options: _options);
     return _unwrap<T>(response);
   }
 
@@ -107,8 +122,9 @@ class AdminApi {
   /// Unwraps the shared response envelope, turning a failure into an
   /// [AdminApiException] carrying the server's stable error code (§66).
   T _unwrap<T>(Response<dynamic> response) {
-    final Map<String, dynamic> body =
-        response.data is Map<String, dynamic> ? response.data as Map<String, dynamic> : <String, dynamic>{};
+    final Map<String, dynamic> body = response.data is Map<String, dynamic>
+        ? response.data as Map<String, dynamic>
+        : <String, dynamic>{};
 
     if (body['success'] == true) {
       return body['data'] as T;

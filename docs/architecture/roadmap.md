@@ -27,39 +27,51 @@ A feature is complete only when all of the following hold:
 | 01 | Foundation — config, logging, dependencies, probes | done |
 | 02 | Database — full schema, migrations, seeds | done |
 | 03 | Authentication — OTP, JWT, refresh rotation, 2FA, sessions | done |
-| 04 | Users — profiles, usernames, privacy, contacts | partial: identity and privacy defaults exist; contact sync and username claiming do not |
+| 04 | Users — profiles, privacy, contacts | done: discovery by HMAC digest, blocking, privacy resolved per viewer in SQL |
 | 05 | WebSocket — hub, heartbeat, acks, sync, cross-node routing | done |
 | 06 | Messaging — send, edit, delete, react, read, drafts | done |
-| 07 | Media — upload sessions, validation, variants | not started |
-| 08 | Groups — roles, permissions, invites, join requests | schema only |
-| 09 | Channels — posts, statistics, discussion links | schema only |
-| 10 | Communities | schema only |
-| 11 | Stories | schema only |
-| 12 | Calls — WebRTC signalling, TURN | schema only |
-| 13 | News platform — CMS, feed, breaking news | schema only |
-| 14 | Search — OpenSearch, Persian normalisation | not started |
-| 15 | Notifications — FCM, APNs | schema only |
-| 16 | Admin panel | not started |
+| 07 | Media — upload sessions, validation, variants | done: server and worker; the mobile UI sends text only |
+| 08 | Groups — roles, permissions, invites, join requests | done |
+| 09 | Channels — posts, statistics, discussion links | done |
+| 10 | Communities | done |
+| 11 | Stories | done: feed, viewer, views and reactions; no capture screen |
+| 12 | Calls — WebRTC signalling, TURN | partial: signalling, ICE servers and history; no peer connection in the app |
+| 13 | News platform — CMS, feed, breaking news | done |
+| 14 | Search — OpenSearch, Persian normalisation | done |
+| 15 | Notifications — FCM, APNs | done |
+| 16 | Admin panel | done |
 | 17 | Security hardening review | ongoing |
 | 18 | Monitoring and alerting | done |
-| 19 | Backup and disaster recovery | scripts pending |
-| 20 | Flutter polish | foundation only |
-| 21 | Integration | pending |
-| 22 | Load testing (§78) | not started |
+| 19 | Backup and disaster recovery | done |
+| 20 | Flutter — feature screens | done for messaging, contacts, groups, channels, stories, news, search, settings |
+| 21 | Integration | done: the real router driven over HTTP and WebSocket against real dependencies |
+| 22 | Load testing (§78) | partial: §79 latency budgets asserted in-process; the 500k ramp has not been run against a cluster |
 | 23 | Production | not started |
 
-## Next stage: media (07)
+## Secret chats (§24)
 
-Acceptance criteria:
+The server half is built: a key directory and a mailbox. It publishes public
+key material, hands out each one-time prekey exactly once, and stores opaque
+ciphertext until the recipient acknowledges it.
 
-- `POST /api/v1/media/upload-sessions` returns presigned part URLs for a
-  multipart upload; the client uploads directly to object storage.
-- Completion validates declared MIME against sniffed magic bytes, enforces the
-  size limit and records a SHA-256; a mismatch rejects the object rather than
-  correcting it.
-- Virus scanning runs when `CLAMAV_ADDR` is set, and is mandatory when
-  `VIRUS_SCAN_REQUIRED` is true.
-- A worker produces image variants (thumbnail, small, medium, preview) and
-  video variants (360p, 720p, 1080p) plus metadata and voice waveforms.
-- Downloads are served by presigned URL, or through the CDN when configured.
-- Attachments reference `media_id` only; bytes never pass through the API.
+The client half — X3DH and the Double Ratchet — is deliberately not on the
+server and is not yet written on the device. Per §84 rules 16 and 17 it will
+use a reviewed implementation rather than a hand-rolled one.
+
+## What is left
+
+**Media in the mobile UI.** The upload session, validation, variant and
+playback APIs are complete and tested. The Flutter composer sends text only,
+so images, video and voice cannot be attached from the app yet.
+
+**The call screen.** Signalling relays SDP and ICE, TURN credentials are
+issued, and history renders. The `flutter_webrtc` peer connection and the
+in-call UI are not built.
+
+**Story composition.** The tray, viewer and view recording work against the
+real API; there is no capture or editing screen.
+
+**Load testing at scale.** `scripts/loadtest/messaging.js` implements the §78
+ramp to 500k concurrent with thresholds that fail on a missed §79 target. It
+has not been run against a deployed cluster. The in-process end-to-end
+measurements bound latency, not capacity.

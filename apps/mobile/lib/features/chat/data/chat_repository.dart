@@ -37,7 +37,21 @@ class ChatRepository {
 
   Stream<List<ChatRow>> watchChats() => _db.watchChats();
 
-  Stream<List<MessageRow>> watchMessages(String chatId) => _db.watchMessages(chatId);
+  Stream<List<MessageRow>> watchMessages(String chatId) =>
+      _db.watchMessages(chatId);
+
+  /// Resolves the one-to-one chat with someone, creating it on first contact.
+  ///
+  /// This needs the network: a private chat is identified by a server-assigned
+  /// id, and inventing a local one would create a second conversation the
+  /// moment the real id arrived.
+  Future<String> openPrivateChat(String userId) async {
+    final Map<String, dynamic> result = await _api.post<Map<String, dynamic>>(
+      '/chats/private',
+      body: <String, dynamic>{'user_id': userId},
+    );
+    return result['chat_id'] as String;
+  }
 
   /// Queues a message. Returns as soon as it is stored locally — the UI never
   /// waits on the network to show what the user just typed.
@@ -118,7 +132,8 @@ class ChatRepository {
         final SocketFrame ack = await _socket.request('message.send', payload);
         await _confirm(entry.clientMessageId, ack.payload);
       } else {
-        final Map<String, dynamic> message = await _api.post<Map<String, dynamic>>(
+        final Map<String, dynamic> message =
+            await _api.post<Map<String, dynamic>>(
           '/chats/${entry.chatId}/messages',
           body: payload..remove('chat_id'),
         );
@@ -137,7 +152,10 @@ class ChatRepository {
     }
   }
 
-  Future<void> _confirm(String clientMessageId, Map<String, dynamic> ack) async {
+  Future<void> _confirm(
+    String clientMessageId,
+    Map<String, dynamic> ack,
+  ) async {
     await _db.confirmMessage(
       clientMessageId: clientMessageId,
       serverId: ack['message_id'] as String,
@@ -146,7 +164,11 @@ class ChatRepository {
     );
   }
 
-  Future<void> _handleFailure(OutboxRow entry, bool retryable, String reason) async {
+  Future<void> _handleFailure(
+    OutboxRow entry,
+    bool retryable,
+    String reason,
+  ) async {
     if (!retryable) {
       // A rejection will never succeed on retry — surface it to the user
       // instead of looping forever.
@@ -155,14 +177,19 @@ class ChatRepository {
       return;
     }
     await _db.markMessageStatus(entry.clientMessageId, MessageStatus.pending);
-    await _db.deferOutboxEntry(entry.clientMessageId, entry.attempts + 1, reason);
+    await _db.deferOutboxEntry(
+      entry.clientMessageId,
+      entry.attempts + 1,
+      reason,
+    );
   }
 
   /// Starts the periodic flush that drains the outbox once connectivity
   /// returns, and drains it immediately whenever the socket reconnects.
   void startOutboxWorker() {
     _flushTimer?.cancel();
-    _flushTimer = Timer.periodic(const Duration(seconds: 10), (_) => flushOutbox());
+    _flushTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) => flushOutbox());
     _socket.status.listen((SocketStatus status) {
       if (status == SocketStatus.connected) {
         unawaited(flushOutbox());
@@ -173,7 +200,8 @@ class ChatRepository {
   void dispose() => _flushTimer?.cancel();
 }
 
-final Provider<ChatRepository> chatRepositoryProvider = Provider<ChatRepository>((Ref ref) {
+final Provider<ChatRepository> chatRepositoryProvider =
+    Provider<ChatRepository>((Ref ref) {
   final ChatRepository repository = ChatRepository(
     database: ref.watch(localDatabaseProvider),
     api: ref.watch(apiClientProvider),
@@ -185,9 +213,12 @@ final Provider<ChatRepository> chatRepositoryProvider = Provider<ChatRepository>
 });
 
 final StreamProvider<List<ChatRow>> chatListProvider =
-    StreamProvider<List<ChatRow>>((Ref ref) => ref.watch(chatRepositoryProvider).watchChats());
+    StreamProvider<List<ChatRow>>(
+  (Ref ref) => ref.watch(chatRepositoryProvider).watchChats(),
+);
 
 final StreamProviderFamily<List<MessageRow>, String> chatMessagesProvider =
     StreamProvider.family<List<MessageRow>, String>(
-  (Ref ref, String chatId) => ref.watch(chatRepositoryProvider).watchMessages(chatId),
+  (Ref ref, String chatId) =>
+      ref.watch(chatRepositoryProvider).watchMessages(chatId),
 );

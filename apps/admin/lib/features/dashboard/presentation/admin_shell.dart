@@ -61,18 +61,21 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         children: <Widget>[
           NavigationRail(
             selectedIndex: _selectedIndex,
-            onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
+            onDestinationSelected: (int index) =>
+                setState(() => _selectedIndex = index),
             labelType: NavigationRailLabelType.all,
             leading: const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Icon(Icons.wb_twilight, size: 32),
             ),
             destinations: _sections
-                .map((_Section section) => NavigationRailDestination(
-                      icon: Icon(section.icon),
-                      selectedIcon: Icon(section.selectedIcon),
-                      label: Text(section.label),
-                    ))
+                .map(
+                  (_Section section) => NavigationRailDestination(
+                    icon: Icon(section.icon),
+                    selectedIcon: Icon(section.selectedIcon),
+                    label: Text(section.label),
+                  ),
+                )
                 .toList(),
           ),
           const VerticalDivider(width: 1),
@@ -123,7 +126,10 @@ class _SignInPage extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  Text('SOBH Admin', style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    'SOBH Admin',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'برای ورود، توکن دسترسی حساب مدیر را وارد کنید',
@@ -199,7 +205,8 @@ class _ErrorState extends StatelessWidget {
 
     // A permission failure is not a fault to report; it is the expected answer
     // for an operator whose role does not cover this section.
-    if (error is AdminApiException && (error as AdminApiException).isForbidden) {
+    if (error is AdminApiException &&
+        (error as AdminApiException).isForbidden) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

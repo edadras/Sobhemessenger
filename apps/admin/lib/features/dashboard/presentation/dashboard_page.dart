@@ -34,22 +34,65 @@ class DashboardPage extends ConsumerWidget {
                 runSpacing: 16,
                 children: <Widget>[
                   _StatCard('کاربران', _number(users['total']), Icons.people),
-                  _StatCard('کاربران فعال امروز', _number(users['daily_active']), Icons.bolt),
-                  _StatCard('کاربران جدید امروز', _number(users['new_today']), Icons.person_add),
-                  _StatCard('پیام‌های امروز', _number(messages['today']), Icons.forum),
-                  _StatCard('کل پیام‌ها', _number(messages['total']), Icons.chat),
+                  _StatCard(
+                    'کاربران فعال امروز',
+                    _number(users['daily_active']),
+                    Icons.bolt,
+                  ),
+                  _StatCard(
+                    'کاربران جدید امروز',
+                    _number(users['new_today']),
+                    Icons.person_add,
+                  ),
+                  _StatCard(
+                    'پیام‌های امروز',
+                    _number(messages['today']),
+                    Icons.forum,
+                  ),
+                  _StatCard(
+                    'کل پیام‌ها',
+                    _number(messages['total']),
+                    Icons.chat,
+                  ),
                   _StatCard('گروه‌ها', _number(chats['groups']), Icons.groups),
-                  _StatCard('کانال‌ها', _number(chats['channels']), Icons.campaign),
-                  _StatCard('حجم رسانه', _bytes(media['total_bytes']), Icons.sd_storage),
-                  _StatCard('اخبار منتشرشده', _number(news['published']), Icons.article),
-                  _StatCard('پیش‌نویس اخبار', _number(news['drafts']), Icons.edit_note),
-                  _StatCard('گزارش‌های باز', _number(moderation['open_reports']), Icons.flag,
-                      highlight: (moderation['open_reports'] as num? ?? 0) > 0),
-                  _StatCard('مسدودهای فعال', _number(moderation['active_bans']), Icons.block),
+                  _StatCard(
+                    'کانال‌ها',
+                    _number(chats['channels']),
+                    Icons.campaign,
+                  ),
+                  _StatCard(
+                    'حجم رسانه',
+                    _bytes(media['total_bytes']),
+                    Icons.sd_storage,
+                  ),
+                  _StatCard(
+                    'اخبار منتشرشده',
+                    _number(news['published']),
+                    Icons.article,
+                  ),
+                  _StatCard(
+                    'پیش‌نویس اخبار',
+                    _number(news['drafts']),
+                    Icons.edit_note,
+                  ),
+                  _StatCard(
+                    'گزارش‌های باز',
+                    _number(moderation['open_reports']),
+                    Icons.flag,
+                    highlight: (moderation['open_reports'] as num? ?? 0) > 0,
+                  ),
+                  _StatCard(
+                    'مسدودهای فعال',
+                    _number(moderation['active_bans']),
+                    Icons.block,
+                  ),
                 ],
               ),
               const SizedBox(height: 32),
-              Text('روند ۳۰ روز گذشته', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'روند ۳۰ روز گذشته',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 12),
               SizedBox(
                 height: 240,
@@ -122,7 +165,10 @@ class _StatCard extends StatelessWidget {
                   Icon(icon, size: 20, color: colors.primary),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ),
                 ],
               ),
@@ -150,7 +196,8 @@ class _SeriesTable extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       itemCount: points.length,
       itemBuilder: (BuildContext context, int index) {
-        final Map<String, dynamic> point = points[index] as Map<String, dynamic>;
+        final Map<String, dynamic> point =
+            points[index] as Map<String, dynamic>;
         final int value = (point['value'] as num?)?.toInt() ?? 0;
         final int maxValue = points.fold<int>(1, (int previous, dynamic item) {
           final int candidate =
@@ -170,7 +217,8 @@ class _SeriesTable extends StatelessWidget {
                 height: 160 * (value / maxValue),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(4)),
                 ),
               ),
               const SizedBox(height: 4),

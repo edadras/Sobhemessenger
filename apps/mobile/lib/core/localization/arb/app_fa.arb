@@ -23,9 +23,21 @@
   "authPhoneHint": "۰۹۱۲ ۳۴۵ ۶۷۸۹",
   "authCodeTitle": "کد تأیید",
   "authCodeSubtitle": "کد ارسال‌شده به {phone} را وارد کنید",
-  "@authCodeSubtitle": { "placeholders": { "phone": { "type": "String" } } },
+  "@authCodeSubtitle": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "authResendIn": "ارسال دوباره تا {seconds} ثانیه",
-  "@authResendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@authResendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "authResend": "ارسال دوباره کد",
   "authPasswordTitle": "رمز دومرحله‌ای",
   "authPasswordHint": "رمز عبور",
@@ -38,11 +50,23 @@
   "chatTyping": "در حال نوشتن…",
   "chatOnline": "آنلاین",
   "chatLastSeen": "آخرین بازدید {time}",
-  "@chatLastSeen": { "placeholders": { "time": { "type": "String" } } },
+  "@chatLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "chatMessageDeleted": "این پیام حذف شد",
   "chatMessageEdited": "ویرایش‌شده",
   "chatUnreadCount": "{count, plural, =0{بدون پیام جدید} =1{۱ پیام جدید} other{{count} پیام جدید}}",
-  "@chatUnreadCount": { "placeholders": { "count": { "type": "int" } } },
+  "@chatUnreadCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "chatHoldToRecord": "برای ضبط نگه دارید",
   "chatSlideToCancel": "برای لغو بکشید",
   "statusConnecting": "در حال اتصال…",
@@ -66,5 +90,155 @@
   "settingsStorage": "فضای ذخیره‌سازی",
   "privacyEveryone": "همه",
   "privacyContacts": "مخاطبین",
-  "privacyNobody": "هیچ‌کس"
+  "privacyNobody": "هیچ‌کس",
+  "commonDone": "تمام",
+  "commonAdd": "افزودن",
+  "commonRemove": "حذف",
+  "commonShare": "هم‌رسانی",
+  "commonSeeAll": "دیدن همه",
+  "commonYes": "بله",
+  "commonNo": "خیر",
+  "navContacts": "مخاطبین",
+  "contactsTitle": "مخاطبین",
+  "contactsEmptyTitle": "هنوز مخاطبی ندارید",
+  "contactsEmptyBody": "دفترچه تلفن خود را همگام کنید تا آشنایانتان را پیدا کنید",
+  "contactsSync": "همگام‌سازی مخاطبین",
+  "contactsSyncing": "در حال همگام‌سازی دفترچه تلفن…",
+  "contactsSyncPrivacy": "فقط درهم‌سازی برگشت‌ناپذیر شماره‌ها از دستگاه شما خارج می‌شود",
+  "contactsSyncResult": "{count, plural, =0{هنوز کسی از مخاطبین شما در صبح نیست} =1{۱ مخاطب پیدا شد} other{{count} مخاطب پیدا شد}}",
+  "@contactsSyncResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsPermissionDenied": "صبح برای خواندن مخاطبین به اجازه نیاز دارد",
+  "contactsBlocked": "کاربران مسدودشده",
+  "contactsBlockedEmpty": "کسی را مسدود نکرده‌اید",
+  "contactsBlock": "مسدود کردن",
+  "contactsUnblock": "رفع مسدودی",
+  "contactsFavorite": "برگزیده",
+  "contactsMessage": "پیام",
+  "groupsCreateTitle": "گروه جدید",
+  "channelsCreateTitle": "کانال جدید",
+  "groupsNameHint": "نام",
+  "groupsDescriptionHint": "توضیح",
+  "groupsPublicLabel": "عمومی",
+  "groupsPublicHint": "همه می‌توانند پیدا و عضو شوند",
+  "groupsUsernameHint": "نشانی عمومی",
+  "groupsMembers": "{count, plural, =1{۱ عضو} other{{count} عضو}}",
+  "@groupsMembers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsSubscribers": "{count, plural, =1{۱ دنبال‌کننده} other{{count} دنبال‌کننده}}",
+  "@groupsSubscribers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsInfoTitle": "اطلاعات",
+  "groupsMembersTitle": "اعضا",
+  "groupsInviteLink": "پیوند دعوت",
+  "groupsJoinRequests": "درخواست‌های عضویت",
+  "groupsLeave": "خروج",
+  "groupsLeaveConfirm": "از این گفتگو خارج می‌شوید؟",
+  "groupsRoleOwner": "مالک",
+  "groupsRoleAdmin": "مدیر",
+  "groupsRoleMember": "عضو",
+  "groupsDiscover": "کاوش",
+  "groupsDiscoverEmpty": "هنوز چیز عمومی برای نمایش نیست",
+  "groupsJoin": "عضویت",
+  "groupsJoinPending": "درخواست شما در انتظار تأیید است",
+  "groupsSlowMode": "حالت آهسته",
+  "groupsApprove": "تأیید",
+  "groupsDecline": "رد",
+  "storiesTitle": "استوری‌ها",
+  "storiesEmpty": "الان استوری‌ای نیست",
+  "storiesMine": "استوری شما",
+  "storiesViewers": "{count, plural, =0{بدون بازدید} =1{۱ بازدید} other{{count} بازدید}}",
+  "@storiesViewers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "storiesExpiresIn": "تا {time} دیگر منقضی می‌شود",
+  "@storiesExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "callsTitle": "تماس‌ها",
+  "callsEmpty": "هنوز تماسی نیست",
+  "callsIncoming": "تماس ورودی",
+  "callsOutgoing": "تماس خروجی",
+  "callsMissed": "تماس بی‌پاسخ",
+  "callsAudio": "تماس صوتی",
+  "callsVideo": "تماس تصویری",
+  "callsAnswer": "پاسخ",
+  "callsDecline": "رد تماس",
+  "callsEnd": "پایان",
+  "callsConnecting": "در حال برقراری…",
+  "callsRinging": "در حال زنگ خوردن…",
+  "callsDuration": "{duration}",
+  "@callsDuration": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "newsTitle": "اخبار",
+  "newsEmpty": "هنوز خبری نیست",
+  "newsLatest": "تازه‌ترین",
+  "newsPopular": "پربازدید",
+  "newsFollowing": "دنبال‌شده",
+  "newsBreaking": "فوری",
+  "newsBookmarks": "ذخیره‌شده",
+  "newsBookmarksEmpty": "هنوز چیزی ذخیره نشده",
+  "newsReadingTime": "{minutes} دقیقه مطالعه",
+  "@newsReadingTime": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "newsCategories": "دسته‌ها",
+  "searchTitle": "جستجو",
+  "searchHint": "جستجوی پیام، افراد و اخبار",
+  "searchEmpty": "چیزی پیدا نشد",
+  "searchPrompt": "برای جستجو بنویسید",
+  "searchSectionMessages": "پیام‌ها",
+  "searchSectionPeople": "افراد",
+  "searchSectionChats": "گفتگوها",
+  "searchSectionNews": "اخبار",
+  "profileTitle": "نمایه",
+  "profileEditName": "نام",
+  "profileUsername": "نام کاربری",
+  "profileBio": "درباره",
+  "profileSignOut": "خروج از حساب",
+  "profileSignOutConfirm": "از این دستگاه خارج می‌شوید؟",
+  "settingsSessionsCurrent": "همین دستگاه",
+  "settingsSessionsRevoke": "خروج",
+  "settingsSessionsRevokeOthers": "خروج از همه دستگاه‌های دیگر",
+  "settingsNotificationsMessages": "پیام‌ها",
+  "settingsNotificationsGroups": "گروه‌ها",
+  "settingsNotificationsChannels": "کانال‌ها",
+  "settingsNotificationsPreview": "نمایش پیش‌نمایش پیام",
+  "settingsNotificationsQuietHours": "ساعات سکوت",
+  "settingsPrivacyLastSeen": "آخرین بازدید",
+  "settingsPrivacyProfilePhoto": "عکس نمایه",
+  "settingsPrivacyMessages": "چه کسی می‌تواند پیام دهد",
+  "settingsPrivacyCalls": "چه کسی می‌تواند تماس بگیرد"
 }

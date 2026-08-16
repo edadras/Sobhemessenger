@@ -51,7 +51,8 @@ class ApiClient {
   Future<bool>? _refreshInFlight;
 
   /// Emits when refresh fails and the user must sign in again (§56).
-  final StreamController<void> _sessionExpired = StreamController<void>.broadcast();
+  final StreamController<void> _sessionExpired =
+      StreamController<void>.broadcast();
   Stream<void> get onSessionExpired => _sessionExpired.stream;
 
   Future<void> _attachAccessToken(
@@ -67,7 +68,10 @@ class ApiClient {
     handler.next(options);
   }
 
-  Future<void> _onError(DioException error, ErrorInterceptorHandler handler) async {
+  Future<void> _onError(
+    DioException error,
+    ErrorInterceptorHandler handler,
+  ) async {
     final Response<dynamic>? response = error.response;
     final bool isAuthFailure = response?.statusCode == 401;
     final bool alreadyRetried = error.requestOptions.extra['retried'] == true;
@@ -87,7 +91,8 @@ class ApiClient {
     // Replay the original request once, with the new token.
     error.requestOptions.extra['retried'] = true;
     try {
-      final Response<dynamic> retried = await _dio.fetch<dynamic>(error.requestOptions);
+      final Response<dynamic> retried =
+          await _dio.fetch<dynamic>(error.requestOptions);
       handler.resolve(retried);
     } on DioException catch (retryError) {
       handler.next(retryError);
@@ -111,7 +116,9 @@ class ApiClient {
       final Response<dynamic> response = await _dio.post<dynamic>(
         '/auth/refresh',
         data: <String, String>{'refresh_token': refreshToken},
-        options: Options(extra: <String, dynamic>{'skipAuth': true, 'retried': true}),
+        options: Options(
+          extra: <String, dynamic>{'skipAuth': true, 'retried': true},
+        ),
       );
 
       final Map<String, dynamic> body = _asMap(response.data);
@@ -142,28 +149,34 @@ class ApiClient {
     Map<String, dynamic>? query,
     bool authenticated = true,
   }) =>
-      _send<T>(() => _dio.get<dynamic>(
-            path,
-            queryParameters: query,
-            options: _options(authenticated),
-          ));
+      _send<T>(
+        () => _dio.get<dynamic>(
+          path,
+          queryParameters: query,
+          options: _options(authenticated),
+        ),
+      );
 
   Future<T> post<T>(
     String path, {
     Object? body,
     bool authenticated = true,
   }) =>
-      _send<T>(() => _dio.post<dynamic>(
-            path,
-            data: body,
-            options: _options(authenticated),
-          ));
+      _send<T>(
+        () => _dio.post<dynamic>(
+          path,
+          data: body,
+          options: _options(authenticated),
+        ),
+      );
 
-  Future<T> patch<T>(String path, {Object? body}) =>
-      _send<T>(() => _dio.patch<dynamic>(path, data: body, options: _options(true)));
+  Future<T> patch<T>(String path, {Object? body}) => _send<T>(
+        () => _dio.patch<dynamic>(path, data: body, options: _options(true)),
+      );
 
-  Future<T> put<T>(String path, {Object? body}) =>
-      _send<T>(() => _dio.put<dynamic>(path, data: body, options: _options(true)));
+  Future<T> put<T>(String path, {Object? body}) => _send<T>(
+        () => _dio.put<dynamic>(path, data: body, options: _options(true)),
+      );
 
   Future<T> delete<T>(String path) =>
       _send<T>(() => _dio.delete<dynamic>(path, options: _options(true)));

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../session_controller.dart';
 import 'phone_entry_screen.dart';
@@ -95,7 +96,9 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
 
   Future<void> _resend() async {
     try {
-      await ref.read(sessionControllerAsyncProvider.notifier).requestCode(widget.phone);
+      await ref
+          .read(sessionControllerAsyncProvider.notifier)
+          .requestCode(widget.phone);
       _startResendCountdown();
     } on ApiException catch (error) {
       if (mounted) {
@@ -108,7 +111,9 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
     final AppLocalizations l10n = AppLocalizations.of(context);
     return switch (error.code) {
       ApiErrorCode.invalidOtp => l10n.authInvalidCode,
-      ApiErrorCode.otpExpired || ApiErrorCode.otpAttemptsExceeded => l10n.authCodeExpired,
+      ApiErrorCode.otpExpired ||
+      ApiErrorCode.otpAttemptsExceeded =>
+        l10n.authCodeExpired,
       ApiErrorCode.invalidPassword => l10n.authInvalidCode,
       ApiErrorCode.rateLimited => l10n.errorRateLimited,
       ApiErrorCode.network || ApiErrorCode.timeout => l10n.errorNetwork,
@@ -183,7 +188,9 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
                 child: TextButton(
                   onPressed: _resendIn > 0 || _submitting ? null : _resend,
                   child: Text(
-                    _resendIn > 0 ? l10n.authResendIn(_resendIn) : l10n.authResend,
+                    _resendIn > 0
+                        ? l10n.authResendIn(_resendIn)
+                        : l10n.authResend,
                   ),
                 ),
               ),

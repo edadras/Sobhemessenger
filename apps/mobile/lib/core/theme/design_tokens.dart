@@ -14,8 +14,11 @@ abstract final class SobhColors {
   static const Color brandSecondary = Color(0xFF1F6F8B);
   static const Color brandAccent = Color(0xFFF2B544);
 
-  static const _Light light = _Light();
-  static const _Dark dark = _Dark();
+  // Typed as the interface, not the private implementation: callers only ever
+  // need the palette contract, and exposing the private class would leak it
+  // into the public API.
+  static const SobhPalette light = _Light();
+  static const SobhPalette dark = _Dark();
 }
 
 /// Semantic slots. A widget asks for `surface` or `textSecondary`; it never

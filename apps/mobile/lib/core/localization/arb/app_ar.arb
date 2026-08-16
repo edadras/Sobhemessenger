@@ -23,9 +23,21 @@
   "authPhoneHint": "٠٩١٢ ٣٤٥ ٦٧٨٩",
   "authCodeTitle": "رمز التحقق",
   "authCodeSubtitle": "أدخل الرمز المرسل إلى {phone}",
-  "@authCodeSubtitle": { "placeholders": { "phone": { "type": "String" } } },
+  "@authCodeSubtitle": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "authResendIn": "إعادة الإرسال خلال {seconds} ثانية",
-  "@authResendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@authResendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "authResend": "إعادة إرسال الرمز",
   "authPasswordTitle": "كلمة مرور التحقق بخطوتين",
   "authPasswordHint": "كلمة المرور",
@@ -38,11 +50,23 @@
   "chatTyping": "يكتب…",
   "chatOnline": "متصل",
   "chatLastSeen": "آخر ظهور {time}",
-  "@chatLastSeen": { "placeholders": { "time": { "type": "String" } } },
+  "@chatLastSeen": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "chatMessageDeleted": "تم حذف هذه الرسالة",
   "chatMessageEdited": "مُعدّلة",
   "chatUnreadCount": "{count, plural, =0{لا رسائل جديدة} =1{رسالة جديدة} other{{count} رسائل جديدة}}",
-  "@chatUnreadCount": { "placeholders": { "count": { "type": "int" } } },
+  "@chatUnreadCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "chatHoldToRecord": "اضغط مطولاً للتسجيل",
   "chatSlideToCancel": "اسحب للإلغاء",
   "statusConnecting": "جارٍ الاتصال…",
@@ -66,5 +90,155 @@
   "settingsStorage": "التخزين",
   "privacyEveryone": "الجميع",
   "privacyContacts": "جهات الاتصال",
-  "privacyNobody": "لا أحد"
+  "privacyNobody": "لا أحد",
+  "commonDone": "تم",
+  "commonAdd": "إضافة",
+  "commonRemove": "إزالة",
+  "commonShare": "مشاركة",
+  "commonSeeAll": "عرض الكل",
+  "commonYes": "نعم",
+  "commonNo": "لا",
+  "navContacts": "جهات الاتصال",
+  "contactsTitle": "جهات الاتصال",
+  "contactsEmptyTitle": "لا توجد جهات اتصال",
+  "contactsEmptyBody": "زامن دفتر هاتفك للعثور على من تعرفهم",
+  "contactsSync": "مزامنة جهات الاتصال",
+  "contactsSyncing": "جارٍ مزامنة دفتر الهاتف…",
+  "contactsSyncPrivacy": "لا يغادر جهازك سوى بصمات غير قابلة للعكس للأرقام",
+  "contactsSyncResult": "{count, plural, =0{لا أحد من جهات اتصالك على صبح بعد} =1{تم العثور على جهة اتصال واحدة} other{تم العثور على {count} جهة اتصال}}",
+  "@contactsSyncResult": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsPermissionDenied": "يحتاج صبح إلى إذن لقراءة جهات اتصالك",
+  "contactsBlocked": "المستخدمون المحظورون",
+  "contactsBlockedEmpty": "لم تحظر أحداً",
+  "contactsBlock": "حظر",
+  "contactsUnblock": "إلغاء الحظر",
+  "contactsFavorite": "مفضّل",
+  "contactsMessage": "رسالة",
+  "groupsCreateTitle": "مجموعة جديدة",
+  "channelsCreateTitle": "قناة جديدة",
+  "groupsNameHint": "الاسم",
+  "groupsDescriptionHint": "الوصف",
+  "groupsPublicLabel": "عام",
+  "groupsPublicHint": "يمكن لأي شخص العثور عليها والانضمام",
+  "groupsUsernameHint": "الرابط العام",
+  "groupsMembers": "{count, plural, =1{عضو واحد} other{{count} عضو}}",
+  "@groupsMembers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsSubscribers": "{count, plural, =1{مشترك واحد} other{{count} مشترك}}",
+  "@groupsSubscribers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "groupsInfoTitle": "معلومات",
+  "groupsMembersTitle": "الأعضاء",
+  "groupsInviteLink": "رابط الدعوة",
+  "groupsJoinRequests": "طلبات الانضمام",
+  "groupsLeave": "مغادرة",
+  "groupsLeaveConfirm": "هل تريد مغادرة هذه المحادثة؟",
+  "groupsRoleOwner": "المالك",
+  "groupsRoleAdmin": "مشرف",
+  "groupsRoleMember": "عضو",
+  "groupsDiscover": "استكشاف",
+  "groupsDiscoverEmpty": "لا يوجد محتوى عام لعرضه بعد",
+  "groupsJoin": "انضمام",
+  "groupsJoinPending": "طلبك في انتظار الموافقة",
+  "groupsSlowMode": "الوضع البطيء",
+  "groupsApprove": "موافقة",
+  "groupsDecline": "رفض",
+  "storiesTitle": "القصص",
+  "storiesEmpty": "لا توجد قصص الآن",
+  "storiesMine": "قصتك",
+  "storiesViewers": "{count, plural, =0{لا مشاهدات} =1{مشاهدة واحدة} other{{count} مشاهدة}}",
+  "@storiesViewers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "storiesExpiresIn": "تنتهي خلال {time}",
+  "@storiesExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "callsTitle": "المكالمات",
+  "callsEmpty": "لا توجد مكالمات",
+  "callsIncoming": "مكالمة واردة",
+  "callsOutgoing": "مكالمة صادرة",
+  "callsMissed": "مكالمة فائتة",
+  "callsAudio": "مكالمة صوتية",
+  "callsVideo": "مكالمة فيديو",
+  "callsAnswer": "رد",
+  "callsDecline": "رفض",
+  "callsEnd": "إنهاء",
+  "callsConnecting": "جارٍ الاتصال…",
+  "callsRinging": "جارٍ الرنين…",
+  "callsDuration": "{duration}",
+  "@callsDuration": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "newsTitle": "الأخبار",
+  "newsEmpty": "لا توجد مقالات بعد",
+  "newsLatest": "الأحدث",
+  "newsPopular": "الأكثر رواجاً",
+  "newsFollowing": "المتابَعة",
+  "newsBreaking": "عاجل",
+  "newsBookmarks": "المحفوظة",
+  "newsBookmarksEmpty": "لا شيء محفوظ بعد",
+  "newsReadingTime": "قراءة {minutes} دقيقة",
+  "@newsReadingTime": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "newsCategories": "الفئات",
+  "searchTitle": "بحث",
+  "searchHint": "ابحث في الرسائل والأشخاص والأخبار",
+  "searchEmpty": "لا نتائج",
+  "searchPrompt": "اكتب للبحث",
+  "searchSectionMessages": "الرسائل",
+  "searchSectionPeople": "الأشخاص",
+  "searchSectionChats": "المحادثات",
+  "searchSectionNews": "الأخبار",
+  "profileTitle": "الملف الشخصي",
+  "profileEditName": "الاسم",
+  "profileUsername": "اسم المستخدم",
+  "profileBio": "نبذة",
+  "profileSignOut": "تسجيل الخروج",
+  "profileSignOutConfirm": "هل تريد الخروج من هذا الجهاز؟",
+  "settingsSessionsCurrent": "هذا الجهاز",
+  "settingsSessionsRevoke": "خروج",
+  "settingsSessionsRevokeOthers": "الخروج من كل الأجهزة الأخرى",
+  "settingsNotificationsMessages": "الرسائل",
+  "settingsNotificationsGroups": "المجموعات",
+  "settingsNotificationsChannels": "القنوات",
+  "settingsNotificationsPreview": "إظهار معاينة الرسالة",
+  "settingsNotificationsQuietHours": "ساعات الهدوء",
+  "settingsPrivacyLastSeen": "آخر ظهور",
+  "settingsPrivacyProfilePhoto": "صورة الملف",
+  "settingsPrivacyMessages": "من يمكنه مراسلتي",
+  "settingsPrivacyCalls": "من يمكنه الاتصال بي"
 }

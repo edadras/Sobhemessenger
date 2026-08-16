@@ -24,8 +24,10 @@ class AppConfig {
     return const AppConfig(
       apiBaseUrl: api,
       wsUrl: ws,
-      appVersion: String.fromEnvironment('SOBH_APP_VERSION', defaultValue: '1.0.0'),
-      environment: String.fromEnvironment('SOBH_ENV', defaultValue: 'development'),
+      appVersion:
+          String.fromEnvironment('SOBH_APP_VERSION', defaultValue: '1.0.0'),
+      environment:
+          String.fromEnvironment('SOBH_ENV', defaultValue: 'development'),
     );
   }
 

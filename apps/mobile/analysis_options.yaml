@@ -10,9 +10,9 @@ analyzer:
     strict-inference: true
     strict-raw-types: true
   errors:
-    # §84.21: no hard-coded colours, sizes or strings in widgets. These are
-    # errors rather than warnings so CI fails on them.
-    avoid_hardcoded_color: ignore
+    # §84.21 — no hard-coded colours, spacing or strings in a widget — has no
+    # lint rule behind it; it is enforced by review and by the fact that every
+    # value comes from SobhTheme and the ARB files.
     missing_required_param: error
     missing_return: error
     invalid_annotation_target: ignore

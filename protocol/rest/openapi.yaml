@@ -563,6 +563,431 @@ paths:
                             items: { $ref: "#/components/schemas/SyncEvent" }
                           server_seq: { type: integer, format: int64 }
 
+  /api/v1/contacts:
+    get:
+      tags: [Contacts]
+      summary: List the caller's contacts
+      description: |
+        Last seen is present only when the contact's privacy rule allows this
+        viewer to see it (§55).
+      responses:
+        "200":
+          description: The address book
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          contacts:
+                            type: array
+                            items: { $ref: "#/components/schemas/Contact" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Contacts]
+      summary: Add one contact by user id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                first_name: { type: string, maxLength: 100 }
+                last_name: { type: string, maxLength: 100 }
+      responses:
+        "200": { description: Added }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/contacts/discovery-parameters:
+    get:
+      tags: [Contacts]
+      summary: How to hash phone numbers before uploading them
+      description: |
+        The pepper is served to authenticated clients rather than embedded in
+        the app, so it can be rotated without shipping a release (§54).
+      responses:
+        "200":
+          description: Discovery parameters
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          algorithm: { type: string, example: HMAC-SHA256 }
+                          pepper: { type: string }
+                          digest_length: { type: integer, example: 32 }
+                          max_batch_size: { type: integer, example: 2000 }
+
+  /api/v1/contacts/sync:
+    post:
+      tags: [Contacts]
+      summary: Match hashed phone numbers against accounts
+      description: |
+        The server never receives a phone number. The client normalises each to
+        E.164, computes HMAC-SHA256 under the published pepper and uploads only
+        the hex digests. `replace: true` makes the batch a full replacement, so
+        a number deleted on the device disappears here too; a partial batch
+        only adds. A user who has blocked the caller is not discoverable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                replace: { type: boolean, default: false }
+                entries:
+                  type: array
+                  maxItems: 2000
+                  items:
+                    type: object
+                    required: [digest]
+                    properties:
+                      digest:
+                        type: string
+                        description: Hex-encoded HMAC-SHA256, 64 characters
+                        pattern: "^[0-9a-fA-F]{64}$"
+                      first_name: { type: string }
+                      last_name: { type: string }
+      responses:
+        "200":
+          description: The entries that resolved to accounts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          matched:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                digest: { type: string }
+                                user_id: { type: string, format: uuid }
+                                display_name: { type: string }
+                          uploaded: { type: integer }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/v1/contacts/{userID}:
+    delete:
+      tags: [Contacts]
+      summary: Remove a contact
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/contacts/{userID}/favorite:
+    put:
+      tags: [Contacts]
+      summary: Set or clear the favourite flag
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                favorite: { type: boolean }
+      responses:
+        "200": { description: Updated }
+
+  /api/v1/contacts/blocked:
+    get:
+      tags: [Contacts]
+      summary: List blocked users
+      responses:
+        "200":
+          description: Blocked users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          blocked:
+                            type: array
+                            items: { $ref: "#/components/schemas/Contact" }
+    post:
+      tags: [Contacts]
+      summary: Block a user
+      description: |
+        Blocking also removes the contact entry in both directions, and makes
+        the blocker undiscoverable to the blocked user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200": { description: Blocked }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/contacts/blocked/{userID}:
+    delete:
+      tags: [Contacts]
+      summary: Unblock a user
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Unblocked }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/secret/keys:
+    post:
+      tags: [Secret chats]
+      summary: Publish this device's public key material
+      description: |
+        Keys are always published for the calling device. Rotating the identity
+        key discards the device's remaining one-time prekeys and terminates its
+        existing sessions, which is what should happen after a reinstall: the
+        peer sees a changed safety number and is warned (§24).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [registration_id, identity_key, signed_prekey, prekey_signature]
+              properties:
+                registration_id: { type: integer, minimum: 1 }
+                identity_key:
+                  type: string
+                  description: Base64, decoding to 32 bytes
+                signed_prekey:
+                  type: string
+                  description: Base64, decoding to 32 bytes
+                prekey_signature:
+                  type: string
+                  description: Base64, decoding to 64 bytes
+                one_time_prekeys:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    properties:
+                      key_id: { type: integer }
+                      public_key: { type: string, description: Base64, decoding to 32 bytes }
+      responses:
+        "200": { description: Published }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/secret/keys/status:
+    get:
+      tags: [Secret chats]
+      summary: How many one-time prekeys this device has left
+      responses:
+        "200":
+          description: Prekey status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          available: { type: integer }
+                          watermark: { type: integer, example: 20 }
+                          needs_upload: { type: boolean }
+
+  /api/v1/secret/keys/{userID}:
+    get:
+      tags: [Secret chats]
+      summary: Claim a key bundle for every device a user has
+      description: |
+        Each call consumes one one-time prekey per device; a prekey is never
+        handed out twice. When a device has none left the bundle omits
+        `one_time_prekey` — X3DH allows a session built from the signed prekey
+        alone, with less forward secrecy, so this is a degraded success rather
+        than a failure.
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: One bundle per device
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          bundles:
+                            type: array
+                            items: { $ref: "#/components/schemas/KeyBundle" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/secret/sessions:
+    post:
+      tags: [Secret chats]
+      summary: Record a session between two devices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id, recipient_device_id]
+              properties:
+                chat_id: { type: string, format: uuid }
+                recipient_device_id: { type: string, format: uuid }
+                fingerprint:
+                  type: string
+                  description: |
+                    Base64 short authentication string both parties compare out
+                    of band. The server stores it and never checks it.
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          session_id: { type: string, format: uuid }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/secret/sessions/{sessionID}/established:
+    post:
+      tags: [Secret chats]
+      summary: Mark a pending session as established
+      parameters:
+        - { name: sessionID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Established }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/secret/messages:
+    post:
+      tags: [Secret chats]
+      summary: Send ciphertext to one device
+      description: |
+        The server stores opaque bytes and cannot read them. Membership of the
+        chat is checked so the mailbox is not an open relay; the payload itself
+        is never examined. A repeated `client_message_id` returns the original
+        envelope rather than storing a second one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id, recipient_device_id, ciphertext, client_message_id]
+              properties:
+                chat_id: { type: string, format: uuid }
+                recipient_device_id: { type: string, format: uuid }
+                ciphertext:
+                  type: string
+                  description: Base64, at most 128 KiB decoded
+                message_type: { type: integer, default: 1 }
+                client_message_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Stored and announced
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          envelope_id: { type: string, format: uuid }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { description: The encrypted payload is too large for a message }
+
+  /api/v1/secret/inbox:
+    get:
+      tags: [Secret chats]
+      summary: Fetch ciphertext waiting for this device
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200":
+          description: Undelivered envelopes, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          envelopes:
+                            type: array
+                            items: { $ref: "#/components/schemas/SecretEnvelope" }
+
+  /api/v1/secret/inbox/ack:
+    post:
+      tags: [Secret chats]
+      summary: Acknowledge delivery, which deletes the ciphertext
+      description: |
+        Acknowledgement deletes rather than flags: the server should hold an
+        encrypted payload only as long as it takes to hand it over. A device
+        can only acknowledge envelopes addressed to itself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: How many envelopes were removed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          acknowledged: { type: integer }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -583,6 +1008,11 @@ components:
           schema: { $ref: "#/components/schemas/Envelope" }
     ValidationFailed:
       description: The request body failed validation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+    Forbidden:
+      description: Authenticated, but not permitted to do this
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Envelope" }
@@ -768,4 +1198,58 @@ components:
           type: string
           examples: ["message.new", "message.edited", "message.deleted"]
         payload: { type: object }
+        created_at: { type: string, format: date-time }
+
+    Contact:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        username: { type: string, nullable: true }
+        display_name: { type: string }
+        is_favorite: { type: boolean }
+        is_mutual:
+          type: boolean
+          description: Whether this person has the caller in their contacts too
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Absent when the contact's privacy rule hides it (§55)
+        created_at: { type: string, format: date-time }
+
+    KeyBundle:
+      type: object
+      description: |
+        Public key material for one device. Everything here is public by
+        design: the private halves never leave the device that generated them.
+      properties:
+        device_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        registration_id: { type: integer }
+        identity_key: { type: string, description: Base64 }
+        signed_prekey: { type: string, description: Base64 }
+        prekey_signature: { type: string, description: Base64 }
+        one_time_prekey:
+          type: object
+          nullable: true
+          description: Present only when the device had one left, and only once
+          properties:
+            key_id: { type: integer }
+            public_key: { type: string, description: Base64 }
+
+    SecretEnvelope:
+      type: object
+      description: |
+        One ciphertext addressed to one device. The server cannot read it and
+        deletes it once the recipient acknowledges it.
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        sender_device_id: { type: string, format: uuid }
+        recipient_device_id: { type: string, format: uuid }
+        ciphertext: { type: string, description: Base64 }
+        message_type: { type: integer }
+        client_message_id: { type: string, format: uuid }
         created_at: { type: string, format: date-time }

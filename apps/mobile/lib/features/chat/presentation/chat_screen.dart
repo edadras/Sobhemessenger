@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/storage/local_database.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../auth/session_controller.dart';
 import '../data/chat_repository.dart';
@@ -36,7 +38,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Clear immediately: the message is already stored locally, so there is
     // nothing to roll back if the network is down.
     _composer.clear();
-    await ref.read(chatRepositoryProvider).sendText(chatId: widget.chatId, content: text);
+    await ref
+        .read(chatRepositoryProvider)
+        .sendText(chatId: widget.chatId, content: text);
   }
 
   @override
@@ -49,7 +53,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     return Scaffold(
       backgroundColor: palette.chatBackground,
-      appBar: AppBar(title: Text(l10n.navChats)),
+      appBar: AppBar(
+        title: Text(l10n.navChats),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: l10n.groupsInfoTitle,
+            onPressed: () => context.push('/chats/${widget.chatId}/info'),
+          ),
+        ],
+      ),
       body: Column(
         children: <Widget>[
           Expanded(
@@ -69,13 +82,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   final MessageRow message = rows[rows.length - 1 - index];
                   return _MessageBubble(
                     message: message,
-                    isOutgoing: message.senderId == null || message.senderId == currentUserId,
+                    isOutgoing: message.senderId == null ||
+                        message.senderId == currentUserId,
                   );
                 },
               ),
             ),
           ),
-          _Composer(controller: _composer, onSend: _send, hint: l10n.chatMessageHint),
+          _Composer(
+            controller: _composer,
+            onSend: _send,
+            hint: l10n.chatMessageHint,
+          ),
         ],
       ),
     );
@@ -96,10 +114,13 @@ class _MessageBubble extends StatelessWidget {
     final bool isDeleted = message.deletedAt != null;
 
     return Align(
-      alignment: isOutgoing ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
+      alignment: isOutgoing
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * SobhSizes.maxBubbleWidthFraction,
+          maxWidth: MediaQuery.sizeOf(context).width *
+              SobhSizes.maxBubbleWidthFraction,
         ),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: SobhSpacing.xs),
@@ -118,7 +139,9 @@ class _MessageBubble extends StatelessWidget {
               Text(
                 isDeleted ? l10n.chatMessageDeleted : message.content,
                 style: text.bodyMedium?.copyWith(
-                  color: isOutgoing ? palette.bubbleOutgoingText : palette.bubbleIncomingText,
+                  color: isOutgoing
+                      ? palette.bubbleOutgoingText
+                      : palette.bubbleIncomingText,
                   fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
                 ),
               ),

@@ -76,7 +76,8 @@ class ApiException implements Exception {
       };
 
   /// True when the device is offline rather than the request being rejected.
-  bool get isOffline => code == ApiErrorCode.network || code == ApiErrorCode.timeout;
+  bool get isOffline =>
+      code == ApiErrorCode.network || code == ApiErrorCode.timeout;
 
   @override
   String toString() => 'ApiException($code, status: $statusCode): $message';

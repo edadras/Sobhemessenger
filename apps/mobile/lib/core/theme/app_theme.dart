@@ -93,13 +93,16 @@ abstract final class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          minimumSize: const Size(SobhSizes.minTapTarget, SobhSizes.minTapTarget),
+          minimumSize:
+              const Size(SobhSizes.minTapTarget, SobhSizes.minTapTarget),
         ),
       ),
-      dividerTheme: DividerThemeData(color: palette.outline, space: 1, thickness: 1),
+      dividerTheme:
+          DividerThemeData(color: palette.outline, space: 1, thickness: 1),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: palette.textPrimary,
-        contentTextStyle: textTheme.bodyMedium?.copyWith(color: palette.surface),
+        contentTextStyle:
+            textTheme.bodyMedium?.copyWith(color: palette.surface),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(SobhRadius.md),
@@ -124,16 +127,37 @@ abstract final class AppTheme {
     final TextStyle secondary = TextStyle(color: palette.textSecondary);
 
     return TextTheme(
-      headlineLarge: primary.copyWith(fontSize: 28, fontWeight: FontWeight.w700, height: 1.3),
-      headlineMedium: primary.copyWith(fontSize: 22, fontWeight: FontWeight.w700, height: 1.3),
-      titleLarge: primary.copyWith(fontSize: 19, fontWeight: FontWeight.w600, height: 1.35),
-      titleMedium: primary.copyWith(fontSize: 16, fontWeight: FontWeight.w600, height: 1.4),
-      titleSmall: primary.copyWith(fontSize: 14, fontWeight: FontWeight.w600, height: 1.4),
+      headlineLarge: primary.copyWith(
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        height: 1.3,
+      ),
+      headlineMedium: primary.copyWith(
+        fontSize: 22,
+        fontWeight: FontWeight.w700,
+        height: 1.3,
+      ),
+      titleLarge: primary.copyWith(
+        fontSize: 19,
+        fontWeight: FontWeight.w600,
+        height: 1.35,
+      ),
+      titleMedium: primary.copyWith(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+      ),
+      titleSmall: primary.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+      ),
       bodyLarge: primary.copyWith(fontSize: 16, height: 1.5),
       bodyMedium: primary.copyWith(fontSize: 14, height: 1.5),
       bodySmall: secondary.copyWith(fontSize: 12, height: 1.45),
       labelLarge: primary.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
-      labelMedium: secondary.copyWith(fontSize: 13, fontWeight: FontWeight.w500),
+      labelMedium:
+          secondary.copyWith(fontSize: 13, fontWeight: FontWeight.w500),
       labelSmall: secondary.copyWith(fontSize: 11, fontWeight: FontWeight.w500),
     );
   }

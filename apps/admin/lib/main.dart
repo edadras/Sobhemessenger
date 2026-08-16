@@ -40,7 +40,10 @@ class SobhAdminApp extends StatelessWidget {
       ),
       locale: const Locale('fa'),
       supportedLocales: const <Locale>[
-        Locale('fa'), Locale('en'), Locale('ar'), Locale('tr'),
+        Locale('fa'),
+        Locale('en'),
+        Locale('ar'),
+        Locale('tr'),
       ],
       localizationsDelegates: const <LocalizationsDelegate<Object>>[
         GlobalMaterialLocalizations.delegate,

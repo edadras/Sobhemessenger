@@ -79,11 +79,21 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 value: _status,
                 items: const <DropdownMenuItem<String>>[
                   DropdownMenuItem<String>(value: '', child: Text('همه')),
-                  DropdownMenuItem<String>(value: 'active', child: Text('فعال')),
-                  DropdownMenuItem<String>(value: 'restricted', child: Text('محدود')),
-                  DropdownMenuItem<String>(value: 'banned', child: Text('مسدود')),
+                  DropdownMenuItem<String>(
+                    value: 'active',
+                    child: Text('فعال'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'restricted',
+                    child: Text('محدود'),
+                  ),
+                  DropdownMenuItem<String>(
+                    value: 'banned',
+                    child: Text('مسدود'),
+                  ),
                 ],
-                onChanged: (String? value) => setState(() => _status = value ?? ''),
+                onChanged: (String? value) =>
+                    setState(() => _status = value ?? ''),
               ),
             ],
           ),
@@ -93,11 +103,13 @@ class _UsersPageState extends ConsumerState<UsersPage> {
               key: ValueKey<String>('$_query|$_status|$_reloadToken'),
               future: api.users(query: _query, status: _status),
               emptyMessage: 'کاربری یافت نشد',
-              builder: (BuildContext context, List<dynamic> users) => ListView.separated(
+              builder: (BuildContext context, List<dynamic> users) =>
+                  ListView.separated(
                 itemCount: users.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (BuildContext context, int index) {
-                  final Map<String, dynamic> user = users[index] as Map<String, dynamic>;
+                  final Map<String, dynamic> user =
+                      users[index] as Map<String, dynamic>;
                   return _UserRow(
                     user: user,
                     onChangeStatus: (String status) =>
@@ -122,7 +134,8 @@ class _UserRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String status = user['status'] as String? ?? 'active';
-    final List<dynamic> roles = user['admin_roles'] as List<dynamic>? ?? const <dynamic>[];
+    final List<dynamic> roles =
+        user['admin_roles'] as List<dynamic>? ?? const <dynamic>[];
 
     return ListTile(
       leading: CircleAvatar(child: Text(_initial(user))),
@@ -131,12 +144,18 @@ class _UserRow extends StatelessWidget {
           Text(user['display_name'] as String? ?? '—'),
           if (user['username'] != null) ...<Widget>[
             const SizedBox(width: 8),
-            Text('@${user['username']}', style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              '@${user['username']}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
           if (roles.isNotEmpty) ...<Widget>[
             const SizedBox(width: 8),
             Chip(
-              label: Text(roles.join(', '), style: Theme.of(context).textTheme.labelSmall),
+              label: Text(
+                roles.join(', '),
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
               visualDensity: VisualDensity.compact,
             ),
           ],
@@ -155,9 +174,13 @@ class _UserRow extends StatelessWidget {
           const SizedBox(width: 8),
           PopupMenuButton<String>(
             onSelected: onChangeStatus,
-            itemBuilder: (BuildContext context) => const <PopupMenuEntry<String>>[
+            itemBuilder: (BuildContext context) =>
+                const <PopupMenuEntry<String>>[
               PopupMenuItem<String>(value: 'active', child: Text('فعال‌سازی')),
-              PopupMenuItem<String>(value: 'restricted', child: Text('محدودسازی')),
+              PopupMenuItem<String>(
+                value: 'restricted',
+                child: Text('محدودسازی'),
+              ),
               PopupMenuItem<String>(value: 'banned', child: Text('مسدودسازی')),
             ],
           ),
@@ -222,7 +245,9 @@ class _ReasonDialogState extends State<_ReasonDialog> {
       content: TextField(
         controller: _controller,
         autofocus: true,
-        decoration: const InputDecoration(labelText: 'دلیل (در گزارش ممیزی ثبت می‌شود)'),
+        decoration: const InputDecoration(
+          labelText: 'دلیل (در گزارش ممیزی ثبت می‌شود)',
+        ),
       ),
       actions: <Widget>[
         TextButton(

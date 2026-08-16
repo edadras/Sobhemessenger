@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/routing/app_router.dart';
 import '../../../core/storage/local_database.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/websocket/socket_client.dart';
 import '../../auth/session_controller.dart';
+import '../../stories/presentation/stories_tray.dart';
 import '../data/chat_repository.dart';
 
 /// The conversation list (§48).
@@ -21,23 +24,48 @@ class ChatListScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(l10n.navChats),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: l10n.searchTitle,
+            onPressed: () => context.push(Routes.search),
+          ),
+        ],
         bottom: const _ConnectionBanner(),
       ),
-      body: chats.when(
-        // The list streams from the local database, so the loading state only
-        // appears on a genuinely cold start.
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (Object error, StackTrace stack) => _ErrorState(message: l10n.errorGeneric),
-        data: (List<ChatRow> rows) {
-          if (rows.isEmpty) {
-            return _EmptyState(title: l10n.chatsEmptyTitle, body: l10n.chatsEmptyBody);
-          }
-          return ListView.separated(
-            itemCount: rows.length,
-            separatorBuilder: (_, __) => const Divider(indent: SobhSpacing.xxl + SobhSpacing.lg),
-            itemBuilder: (BuildContext context, int index) => _ChatTile(chat: rows[index]),
-          );
-        },
+      body: Column(
+        children: <Widget>[
+          // Stories sit above the list and collapse entirely when there are
+          // none, so they never cost the conversation list any height.
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: SobhSpacing.sm),
+            child: StoriesTray(),
+          ),
+          Expanded(
+            child: chats.when(
+              // The list streams from the local database, so the loading state
+              // only appears on a genuinely cold start.
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (Object error, StackTrace stack) =>
+                  _ErrorState(message: l10n.errorGeneric),
+              data: (List<ChatRow> rows) {
+                if (rows.isEmpty) {
+                  return _EmptyState(
+                    title: l10n.chatsEmptyTitle,
+                    body: l10n.chatsEmptyBody,
+                  );
+                }
+                return ListView.separated(
+                  itemCount: rows.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(indent: SobhSpacing.xxl + SobhSpacing.lg),
+                  itemBuilder: (BuildContext context, int index) =>
+                      _ChatTile(chat: rows[index]),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -104,8 +132,11 @@ class _ConnectionBanner extends ConsumerWidget implements PreferredSizeWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final SobhPalette palette = SobhTheme.of(context);
-    final AsyncValue<SocketStatus> status =
-        ref.watch(StreamProvider<SocketStatus>((Ref ref) => ref.watch(socketClientProvider).status));
+    final AsyncValue<SocketStatus> status = ref.watch(
+      StreamProvider<SocketStatus>(
+        (Ref ref) => ref.watch(socketClientProvider).status,
+      ),
+    );
 
     final SocketStatus current = status.valueOrNull ?? SocketStatus.connecting;
     if (current == SocketStatus.connected) {
@@ -148,7 +179,11 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.forum_outlined, size: SobhSizes.avatarLarge, color: palette.textDisabled),
+            Icon(
+              Icons.forum_outlined,
+              size: SobhSizes.avatarLarge,
+              color: palette.textDisabled,
+            ),
             const SizedBox(height: SobhSpacing.lg),
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: SobhSpacing.sm),

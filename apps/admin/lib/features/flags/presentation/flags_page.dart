@@ -51,13 +51,16 @@ class _FlagsPageState extends ConsumerState<FlagsPage> {
             child: AsyncSection<List<dynamic>>(
               key: ValueKey<int>(_reloadToken),
               future: api.featureFlags(),
-              builder: (BuildContext context, List<dynamic> flags) => ListView.separated(
+              builder: (BuildContext context, List<dynamic> flags) =>
+                  ListView.separated(
                 itemCount: flags.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (BuildContext context, int index) {
-                  final Map<String, dynamic> flag = flags[index] as Map<String, dynamic>;
+                  final Map<String, dynamic> flag =
+                      flags[index] as Map<String, dynamic>;
                   final bool enabled = flag['enabled'] as bool? ?? false;
-                  final int rollout = (flag['rollout_percent'] as num?)?.toInt() ?? 100;
+                  final int rollout =
+                      (flag['rollout_percent'] as num?)?.toInt() ?? 100;
 
                   return SwitchListTile(
                     title: Text(flag['key'] as String),
@@ -66,9 +69,8 @@ class _FlagsPageState extends ConsumerState<FlagsPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    secondary: rollout < 100
-                        ? Chip(label: Text('$rollout٪'))
-                        : null,
+                    secondary:
+                        rollout < 100 ? Chip(label: Text('$rollout٪')) : null,
                     value: enabled,
                     onChanged: (bool value) =>
                         _toggle(flag['key'] as String, value, rollout),
