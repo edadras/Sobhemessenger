@@ -1,0 +1,63 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sobh-api
+  namespace: sobh
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # TLS 1.3 only at the edge (§33).
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.3"
+    # WebSocket connections must outlive the default 60s proxy timeout.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [api.sobh.app]
+      secretName: sobh-api-tls
+  rules:
+    - host: api.sobh.app
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: sobh-api, port: { number: 80 } } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sobh-api
+  namespace: sobh
+spec:
+  podSelector:
+    matchLabels: { app: sobh-api }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { name: ingress-nginx }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # Prometheus scrapes the metrics port only.
+    - from:
+        - namespaceSelector:
+            matchLabels: { name: monitoring }
+      ports:
+        - { protocol: TCP, port: 9090 }
+  egress:
+    # Data stores inside the namespace.
+    - to:
+        - podSelector: {}
+    # DNS.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Outbound HTTPS for SMS, FCM and APNs.
+    - ports:
+        - { protocol: TCP, port: 443 }

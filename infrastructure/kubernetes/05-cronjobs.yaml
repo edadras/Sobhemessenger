@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sobh-backup-daily
+  namespace: sobh
+spec:
+  # 03:00 UTC is off-peak for the launch market (UTC+3:30).
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+          containers:
+            - name: backup
+              image: ghcr.io/sobh/backup:latest
+              args: ["daily"]
+              envFrom:
+                - secretRef: { name: sobh-secrets }
+                - secretRef: { name: sobh-backup-secrets }
+              resources:
+                requests: { cpu: 200m, memory: 256Mi }
+                limits: { cpu: "1", memory: 1Gi }
+              volumeMounts:
+                - { name: staging, mountPath: /var/backups/sobh }
+          volumes:
+            - name: staging
+              persistentVolumeClaim: { claimName: sobh-backup-staging }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sobh-backup-weekly
+  namespace: sobh
+spec:
+  schedule: "30 3 * * 0"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: ghcr.io/sobh/backup:latest
+              args: ["weekly", "--with-media"]
+              envFrom:
+                - secretRef: { name: sobh-secrets }
+                - secretRef: { name: sobh-backup-secrets }
+              volumeMounts:
+                - { name: staging, mountPath: /var/backups/sobh }
+          volumes:
+            - name: staging
+              persistentVolumeClaim: { claimName: sobh-backup-staging }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sobh-backup-staging
+  namespace: sobh
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 100Gi }

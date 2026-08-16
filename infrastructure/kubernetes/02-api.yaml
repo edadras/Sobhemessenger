@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sobh-api
+  namespace: sobh
+  labels: { app: sobh-api, component: api }
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: { app: sobh-api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the running replica count during a deploy: WebSocket
+      # clients reconnect to another pod rather than finding none (§75).
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: sobh-api, component: api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      # Spread replicas across nodes so one node failing cannot take the API
+      # down entirely.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: sobh-api }
+      initContainers:
+        # Migrations run to completion before any replica serves traffic.
+        - name: migrate
+          image: ghcr.io/sobh/api:latest
+          command: ["/usr/local/bin/migrate", "-dir", "/app/migrations", "up"]
+          envFrom:
+            - configMapRef: { name: sobh-config }
+            - secretRef: { name: sobh-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: api
+          image: ghcr.io/sobh/api:latest
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          envFrom:
+            - configMapRef: { name: sobh-config }
+            - secretRef: { name: sobh-secrets }
+          env:
+            - name: NODE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "2", memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            # /health touches no dependency, so a database blip cannot cause a
+            # restart loop (§36).
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              # Give the load balancer time to stop sending new connections
+              # before the process starts draining.
+              exec: { command: ["/bin/sleep", "5"] }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      terminationGracePeriodSeconds: 60
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sobh-api
+  namespace: sobh
+spec:
+  selector: { app: sobh-api }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+    - { name: metrics, port: 9090, targetPort: metrics }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sobh-api
+  namespace: sobh
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: sobh-api }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sobh-api
+  namespace: sobh
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: sobh-api }
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+    - type: Pods
+      resource: { name: memory, target: { type: Utilization, averageUtilization: 80 } }
+  behavior:
+    scaleDown:
+      # Scale down slowly: WebSocket connections are long-lived and every
+      # removed pod forces its clients to reconnect.
+      stabilizationWindowSeconds: 300
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - { type: Percent, value: 100, periodSeconds: 30 }

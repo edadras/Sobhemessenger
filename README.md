@@ -116,48 +116,52 @@ the server stores public key material and opaque ciphertext only.
 
 ## Implementation status
 
-The specification describes the complete platform. This repository implements it
-in the staged order the specification itself prescribes, so that every stage is
-tested and usable before the next begins. Nothing below is mocked or stubbed:
-what is marked complete is wired to a real database and covered by tests.
+The specification describes the complete platform. This repository implements
+it in the staged order the specification itself prescribes, so that every stage
+is tested and usable before the next begins. Nothing below is mocked or
+stubbed: what is marked complete is wired to a real database and covered by
+tests.
 
 ### Complete
 
 | Area | What exists |
 |---|---|
-| **Database** | 74 tables covering every domain in the specification — identity, devices, chats, messages, media, groups, channels, communities, stories, polls, calls, news, notifications, moderation, RBAC, audit, analytics. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
-| **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
+| **Database** | 74 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
+| **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
-| **Authentication** | OTP request/verify with sliding-window rate limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), account creation on first sign-in, JWT access tokens with key rotation, refresh-token rotation with replay detection, two-step verification, session and device listing and revocation, login history. |
-| **Messaging** | Chats and membership, permission model with per-member overrides, send/edit/delete/react/read/pin/draft, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows, history paging by sequence. |
-| **Realtime** | WebSocket with authenticated handshake, protocol versioning, heartbeats, request/ack correlation, resume-from-cursor, slow-consumer eviction, per-user and per-chat NATS routing across nodes, presence. |
-| **Background work** | Durable job consumers with backoff and poison-message handling, plus maintenance: OTP expiry, event-log pruning, story expiry, abandoned uploads, scheduled article publishing. |
-| **Feature flags** | Runtime switches with percentage rollout bucketed per user, cached in-process and shared via Redis. |
-| **Infrastructure** | Docker Compose dev stack, distroless multi-stage image, nginx edge config, Prometheus scrape config and alerts derived from the §79 latency targets, Grafana provisioning, CI with lint, tests, reversible-migration check, vulnerability and secret scanning, and image scanning. |
-| **Protocol** | OpenAPI 3.1 for the implemented surface, and a full WebSocket protocol document. |
-| **Flutter foundation** | Clean-architecture skeleton, design tokens with light and dark palettes, four locales (fa/en/tr/ar) with correct RTL, Dio client that unwraps the envelope and collapses concurrent token refreshes, WebSocket client with jittered backoff and cursor resume, Drift schema with a real offline outbox, Riverpod providers, GoRouter with auth redirect, sign-in and chat screens. |
+| **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
+| **Messaging** | Chats and membership, permissions with per-member overrides, send/edit/delete/react/read/pin/draft, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows. |
+| **Realtime** | WebSocket with authenticated handshake, protocol versioning, heartbeats, ack correlation, resume-from-cursor, slow-consumer eviction, cross-node routing, presence. |
+| **Media** | Resumable presigned multipart uploads, magic-byte validation against the declared MIME, ClamAV scanning, image variants with BlurHash, ffmpeg video renditions and posters, Opus normalisation and waveforms for voice. |
+| **Groups & channels** | Creation, roles with per-member overrides, ownership transfer, rank-checked member administration, invite links with limits and expiry, join requests, distinct-viewer counting, per-post statistics, public directory. |
+| **Communities** | Rooms grouped into sections, starter rooms on creation, membership cascading into default rooms. |
+| **Stories & polls** | Privacy scopes evaluated per viewer in SQL with deny-list override, views, reactions, close friends, 24-hour expiry; polls with single/multiple choice, quizzes, anonymity and transactional vote replacement. |
+| **Calls** | WebRTC signalling that relays SDP and ICE without parsing them, participant lifecycle, media state, ephemeral HMAC TURN credentials. |
+| **News** | Editorial state machine with publish as a separate permission, categories with per-locale names, authors, tags, feed modes (latest, popular with time decay, following, breaking), bookmarks, follows, view counting. |
+| **Search** | OpenSearch indices built for Persian and Arabic — letter folding, zero-width non-joiner handling, digit folding — with prefix analyzers, member-scoped message search, and reindex from PostgreSQL. |
+| **Notifications** | Settings, quiet hours, preview suppression, push token lifecycle, FCM HTTP v1 and APNs over HTTP/2, token retirement, collapse keys, paged breaking-news fan-out. |
+| **Admin** | RBAC-gated endpoints for users, reports, bans, flags, analytics and audit log; every mutation audited; bans revoke sessions immediately; Flutter Web panel with dashboard, users, reports, editorial queue and feature flags. |
+| **Background work** | Durable job consumers with backoff and poison-message handling, media processing, push delivery, search indexing, and maintenance (OTP expiry, event-log pruning, story expiry, abandoned uploads, scheduled publishing). |
+| **Infrastructure** | Docker Compose dev stack, distroless image, nginx edge config, Prometheus alerts derived from the §79 targets, Grafana provisioning, Kubernetes manifests with PDB/HPA/NetworkPolicy and backup CronJobs, encrypted backup and verified restore scripts, CI with lint, tests, reversible-migration check and image scanning. |
+| **Protocol** | OpenAPI 3.1 for the implemented surface and a full WebSocket protocol document. |
+| **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox, sign-in and chat screens. |
 
 ### Not yet built
 
-These have their database schema, error codes and architectural seams in place,
-but no service or UI yet:
+- **Mobile feature screens** — groups, channels, communities, stories, calls,
+  news and settings have complete, documented APIs but no Flutter UI yet.
+- **Contact sync (§54)** — the privacy-preserving design is in place
+  (`users.phone_hash` is an HMAC under a server-side pepper); the batch
+  matching endpoint is not written.
+- **Secret chats (§24)** — key-exchange tables, prekey storage and ciphertext
+  columns exist. The X3DH and Double Ratchet implementation belongs on the
+  device and is not written.
+- **End-to-end integration (§21)** — every module is tested against a real
+  PostgreSQL, but the full stack has not been brought up together and exercised.
+- **Load testing (§22)** — the k6 harness implements the §78 ramp with
+  thresholds that fail on a missed §79 target; it has not been run.
 
-- **Media pipeline** — upload sessions, presigned multipart uploads, magic-byte
-  and virus validation, image and video variant generation, voice waveforms.
-- **Groups, channels, communities** — membership administration, invite links,
-  join requests, channel posts and statistics.
-- **Stories, polls, calls** — including WebRTC signalling and TURN credentials.
-- **News platform** — CMS, editorial workflow, feed, breaking news.
-- **Search** — OpenSearch indexing and Persian/Arabic normalisation.
-- **Notifications** — FCM and APNs delivery workers.
-- **Admin panel** — `apps/admin` is scaffolded but empty.
-- **Secret chats** — the key-exchange tables exist; the device-side ratchet does not.
-- **Load testing** — no run has been performed against the §78 targets.
-
-`docs/architecture/roadmap.md` carries the delivery order and the acceptance
-criteria for each.
-
----
+`docs/architecture/roadmap.md` carries the per-stage detail.
 
 ## Documentation
 

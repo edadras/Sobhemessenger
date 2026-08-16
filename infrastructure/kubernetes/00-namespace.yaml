@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sobh
+  labels:
+    name: sobh
+    # Enforce the restricted Pod Security Standard: no privileged containers,
+    # no host namespaces, non-root only (§33).
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
