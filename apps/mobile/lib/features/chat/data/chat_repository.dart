@@ -59,6 +59,43 @@ class ChatRepository {
     required String chatId,
     required String content,
     String? replyToId,
+  }) =>
+      _send(
+        chatId: chatId,
+        type: 'text',
+        content: content,
+        replyToId: replyToId,
+      );
+
+  /// Queues a message carrying already-uploaded media.
+  ///
+  /// The bytes are uploaded first and the message references `media_id` only,
+  /// so a send that reaches the outbox is small and retrying it never
+  /// re-uploads the file (§13).
+  Future<String> sendMedia({
+    required String chatId,
+    required String type,
+    required List<String> mediaIds,
+    String content = '',
+    String? replyToId,
+  }) =>
+      _send(
+        chatId: chatId,
+        type: type,
+        content: content,
+        replyToId: replyToId,
+        attachments: <Map<String, dynamic>>[
+          for (int i = 0; i < mediaIds.length; i++)
+            <String, dynamic>{'media_id': mediaIds[i], 'position': i},
+        ],
+      );
+
+  Future<String> _send({
+    required String chatId,
+    required String type,
+    required String content,
+    String? replyToId,
+    List<Map<String, dynamic>> attachments = const <Map<String, dynamic>>[],
   }) async {
     final String clientMessageId = _uuid.v4();
     final DateTime now = DateTime.now().toUtc();
@@ -66,9 +103,10 @@ class ChatRepository {
     final Map<String, dynamic> payload = <String, dynamic>{
       'client_message_id': clientMessageId,
       'chat_id': chatId,
-      'type': 'text',
+      'type': type,
       'content': content,
       if (replyToId != null) 'reply_to_id': replyToId,
+      if (attachments.isNotEmpty) 'attachments': attachments,
     };
 
     await _db.transaction(() async {
@@ -78,9 +116,12 @@ class ChatRepository {
           id: clientMessageId,
           chatId: chatId,
           clientMessageId: clientMessageId,
-          type: const Value<String>('text'),
+          type: Value<String>(type),
           content: Value<String>(content),
           replyToId: Value<String?>(replyToId),
+          attachmentsJson: Value<String?>(
+            attachments.isEmpty ? null : jsonEncode(attachments),
+          ),
           status: MessageStatus.pending,
           createdAt: now,
         ),

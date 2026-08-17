@@ -6,6 +6,7 @@ import 'core/localization/generated/app_localizations.dart';
 import 'core/routing/app_router.dart';
 import 'core/settings/settings_controller.dart';
 import 'core/theme/app_theme.dart';
+import 'features/calls/presentation/incoming_call_listener.dart';
 
 /// Root of the SOBH application.
 class SobhApp extends ConsumerWidget {
@@ -41,7 +42,12 @@ class SobhApp extends ConsumerWidget {
             // action bars stay usable at the extremes (§45).
             minScaleFactor: 0.8,
             maxScaleFactor: 1.6,
-            child: child ?? const SizedBox.shrink(),
+            // A call can arrive on any screen, so the listener sits above the
+            // whole navigator rather than on one of them (§18).
+            child: IncomingCallListener(
+              navigatorKey: rootNavigatorKey,
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       },

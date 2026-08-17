@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../core/network/api_exception.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/token_store.dart';
 import '../../core/websocket/socket_client.dart';
+import '../notifications/data/push_registration.dart';
 
 final Provider<AppConfig> appConfigProvider =
     Provider<AppConfig>((Ref ref) => AppConfig.fromEnvironment());
@@ -144,11 +147,21 @@ class SessionController extends AsyncNotifier<SessionState> {
       ),
     );
     unawaitedConnect();
+
+    // Push registration needs a session, so it starts here rather than at
+    // launch. It is best effort and never blocks sign-in (§30).
+    unawaited(ref.read(pushRegistrationProvider).start());
   }
 
   /// Ends the session and removes every local trace of the account (§58).
   Future<void> signOut() async {
     final ApiClient api = ref.read(apiClientProvider);
+
+    // Retire the push token first, while the access token is still valid:
+    // afterwards the server would reject the call and keep sending to a
+    // device that has signed out.
+    await ref.read(pushRegistrationProvider).stop();
+
     try {
       await api.post<Map<String, dynamic>>('/auth/logout');
     } on ApiException {

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/phone_entry_screen.dart';
 import '../../features/auth/presentation/verify_code_screen.dart';
 import '../../features/auth/session_controller.dart';
+import '../../features/calls/presentation/call_screen.dart';
 import '../../features/calls/presentation/calls_screen.dart';
 import '../../features/chat/presentation/chat_list_screen.dart';
 import '../../features/chat/presentation/chat_screen.dart';
@@ -16,6 +17,7 @@ import '../../features/search/presentation/search_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/shell/presentation/home_shell.dart';
 import '../../features/stories/presentation/stories_tray.dart';
+import '../../features/stories/presentation/story_composer_screen.dart';
 
 /// Route names, referenced by constant so a typo is a compile error.
 abstract final class Routes {
@@ -30,6 +32,8 @@ abstract final class Routes {
   static const String news = '/news';
   static const String calls = '/calls';
   static const String stories = '/stories';
+  static const String storyComposer = '/stories/new';
+  static const String call = '/call';
   static const String search = '/search';
   static const String profile = '/profile';
   static const String settings = '/settings';
@@ -42,7 +46,9 @@ class GoRouterConfig {
   final GoRouter router;
 }
 
-final GlobalKey<NavigatorState> _rootNavigator = GlobalKey<NavigatorState>();
+/// The root navigator. Exposed so the incoming-call listener, which sits
+/// above the router, can push the call screen onto it.
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final Provider<GoRouterConfig> appRouterProvider =
     Provider<GoRouterConfig>((Ref ref) {
@@ -50,7 +56,7 @@ final Provider<GoRouterConfig> appRouterProvider =
 
   return GoRouterConfig(
     GoRouter(
-      navigatorKey: _rootNavigator,
+      navigatorKey: rootNavigatorKey,
       initialLocation: Routes.splash,
       // Redirect is the single place authentication decides where the user
       // may be, so no screen has to guard itself.
@@ -104,13 +110,13 @@ final Provider<GoRouterConfig> appRouterProvider =
                       path: ':chatId',
                       // A conversation covers the bottom bar: it is a
                       // destination in its own right, not a tab.
-                      parentNavigatorKey: _rootNavigator,
+                      parentNavigatorKey: rootNavigatorKey,
                       builder: (BuildContext context, GoRouterState state) =>
                           ChatScreen(chatId: state.pathParameters['chatId']!),
                       routes: <RouteBase>[
                         GoRoute(
                           path: 'info',
-                          parentNavigatorKey: _rootNavigator,
+                          parentNavigatorKey: rootNavigatorKey,
                           builder:
                               (BuildContext context, GoRouterState state) =>
                                   ChatInfoScreen(
@@ -165,7 +171,14 @@ final Provider<GoRouterConfig> appRouterProvider =
         GoRoute(
           path: Routes.stories,
           builder: (_, __) => const StoriesScreen(),
+          routes: <RouteBase>[
+            GoRoute(
+              path: 'new',
+              builder: (_, __) => const StoryComposerScreen(),
+            ),
+          ],
         ),
+        GoRoute(path: Routes.call, builder: (_, __) => const CallScreen()),
         GoRoute(
           path: Routes.settings,
           builder: (_, __) => const SettingsScreen(),

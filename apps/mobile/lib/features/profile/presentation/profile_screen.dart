@@ -6,7 +6,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../../auth/session_controller.dart';
+import '../../communities/presentation/communities_screen.dart';
 import '../../contacts/presentation/contacts_screen.dart';
+import '../../notifications/presentation/notifications_screen.dart';
 import '../../settings/data/account_repository.dart';
 import '../../settings/presentation/settings_screen.dart';
 
@@ -77,6 +79,24 @@ class ProfileScreen extends ConsumerWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const BlockedContactsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.groups_outlined),
+            title: Text(l10n.communitiesTitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const CommunitiesScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications_none),
+            title: Text(l10n.notificationsTitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const NotificationsScreen(),
               ),
             ),
           ),
