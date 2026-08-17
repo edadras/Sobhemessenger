@@ -290,5 +290,100 @@
   "communitiesRooms": "اتاق‌ها",
   "notificationsTitle": "اعلان‌ها",
   "notificationsEmpty": "چیز تازه‌ای نیست",
-  "notificationsMarkRead": "علامت‌گذاری همه به‌عنوان خوانده"
+  "notificationsMarkRead": "علامت‌گذاری همه به‌عنوان خوانده",
+  "languageFarsi": "فارسی",
+  "languageEnglish": "انگلیسی",
+  "languageTurkish": "ترکی",
+  "languageArabic": "عربی",
+  "profileEditTitle": "ویرایش نمایه",
+  "profileSaved": "نمایه ذخیره شد",
+  "profilePhone": "شماره تلفن",
+  "profileBioHelp": "این را همه می‌بینند.",
+  "profileUsernameNone": "تنظیم نشده",
+  "profileUsernameClaim": "ثبت",
+  "profileUsernameClaimed": "نام کاربری ثبت شد",
+  "profileUsernameRules": "۵ تا ۳۲ نویسه. حروف، رقم و زیرخط، با شروع از یک حرف.",
+  "profileUsernameInvalid": "این نام کاربری معتبر نیست.",
+  "profileUsernameReserved": "این نام رزرو شده است.",
+  "profileUsernameTaken": "این نام قبلاً گرفته شده است.",
+  "botsTitle": "ربات‌ها",
+  "botsSubtitle": "ربات‌های خودتان را بسازید و مدیریت کنید",
+  "botsRegister": "ربات جدید",
+  "botsName": "نام ربات",
+  "botsDescription": "توضیحات",
+  "botsInactive": "غیرفعال",
+  "botsEmptyTitle": "هنوز رباتی ندارید",
+  "botsEmptyMessage": "ربات حسابی است که برنامهٔ شما با آن وارد می‌شود. یکی ثبت کنید تا توکنش را بگیرید.",
+  "botsUsernameRules": "باید به «bot» ختم شود تا هرکس از روی نام کاربری بفهمد با ربات طرف است.",
+  "botsSettings": "تنظیمات",
+  "botsPrivacyMode": "حالت حریم خصوصی",
+  "botsPrivacyModeHelp": "ربات فقط پیام‌هایی را می‌گیرد که خطاب به اوست: دستورها، پاسخ‌ها و منشن‌ها.",
+  "botsCanJoinGroups": "می‌تواند به گروه‌ها افزوده شود",
+  "botsActive": "فعال",
+  "botsActiveHelp": "خاموش کردن این گزینه همهٔ توکن‌ها را یک‌جا از کار می‌اندازد.",
+  "botsTokens": "توکن‌ها",
+  "botsIssueToken": "توکن جدید",
+  "botsNoTokens": "توکن فعالی وجود ندارد",
+  "botsTokenNoLabel": "بدون برچسب",
+  "botsTokenLabel": "برچسب",
+  "botsTokenLabelHelp": "فقط برای یادداشت خودتان، تا دو توکن را از هم تشخیص دهید.",
+  "botsTokenTitle": "توکن ربات شما",
+  "botsTokenOnce": "همین حالا کپی کنید. فقط یک بار نمایش داده می‌شود و قابل بازیابی نیست — تنها یک هش ذخیره می‌شود.",
+  "botsTokenCopied": "توکن کپی شد",
+  "botsRevokeToken": "ابطال",
+  "botsRevokeTokenConfirm": "ابطال بلافاصله اعمال می‌شود. هر چیزی که از این توکن استفاده می‌کند از کار می‌افتد.",
+  "botsWebhook": "وب‌هوک",
+  "botsWebhookNone": "دریافت با نظرخواهی",
+  "botsWebhookNoneHelp": "بدون وب‌هوک، ربات به‌روزرسانی‌هایش را خودش می‌گیرد.",
+  "botsWebhookSet": "تنظیم وب‌هوک",
+  "botsWebhookRemove": "حذف وب‌هوک",
+  "botsWebhookUrl": "نشانی",
+  "botsWebhookUrlHelp": "باید https و از اینترنت در دسترس باشد. نشانی‌های خصوصی و محلی پذیرفته نمی‌شوند.",
+  "botsWebhookSecretTitle": "کلید امضا",
+  "botsWebhookSecretHelp": "هر تحویل یک سرایند X-SOBH-Signature دارد: HMAC-SHA256 بدنه با این کلید. آن را بررسی کنید تا کسی که نشانی شما را می‌داند نتواند خود را جای ما جا بزند.",
+  "stickersTitle": "استیکرها",
+  "stickersBrowse": "یافتن بسته‌ها",
+  "stickersSearchHint": "جست‌وجوی بسته‌های استیکر",
+  "stickersNoneTitle": "بسته‌ای ندارید",
+  "stickersNoneMessage": "یک بسته اضافه کنید تا اینجا نمایش داده شود.",
+  "stickersNoResultsTitle": "چیزی پیدا نشد",
+  "stickersNoResultsMessage": "نام دیگری را امتحان کنید، یا ایموجی‌ای از همان بسته.",
+  "chatPin": "سنجاق",
+  "chatUnpin": "برداشتن سنجاق",
+  "chatForwardTo": "هدایت به",
+  "chatMessageNotSentYet": "این پیام هنوز فرستاده نشده است.",
+  "chatMute": "بی‌صدا",
+  "chatUnmute": "باصدا",
+  "chatMuted": "بی‌صدا شد",
+  "chatUnmuted": "صدا برگشت",
+  "chatArchive": "بایگانی",
+  "chatArchived": "بایگانی شد",
+  "chatScheduledTitle": "زمان‌بندی‌شده",
+  "chatScheduleNew": "زمان‌بندی یک پیام",
+  "chatScheduledEmptyTitle": "چیزی زمان‌بندی نشده",
+  "chatScheduledEmptyMessage": "پیام زمان‌بندی‌شده تا وقتی فرستاده نشود خصوصی می‌ماند.",
+  "chatForwarded": "به {chat} هدایت شد",
+  "chatScheduledFailed": "فرستاده نشد: {reason}",
+  "profileUsernameReleaseNotice": "‏@{previous} به مدت ۳۰ روز نگه داشته می‌شود تا کس دیگری آن را نگیرد. در این مدت هر وقت بخواهید می‌توانید دوباره آن را بگیرید.",
+  "@chatForwarded": {
+    "placeholders": {
+      "chat": {
+        "type": "String"
+      }
+    }
+  },
+  "@chatScheduledFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "@profileUsernameReleaseNotice": {
+    "placeholders": {
+      "previous": {
+        "type": "String"
+      }
+    }
+  }
 }

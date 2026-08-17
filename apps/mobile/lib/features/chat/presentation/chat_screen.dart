@@ -19,7 +19,15 @@ import '../../media/data/media_repository.dart';
 import '../../media/presentation/attachment_picker.dart';
 import '../../media/presentation/media_widgets.dart';
 import '../../polls/presentation/poll_widgets.dart';
+import '../../stickers/presentation/sticker_picker.dart';
 import '../data/chat_repository.dart';
+import '../data/organise_repository.dart';
+import 'message_actions.dart';
+import 'scheduled_messages_screen.dart';
+
+/// What the chat's overflow menu offers beyond the actions with their own
+/// buttons.
+enum _ChatAction { scheduled, mute, unmute, archive }
 
 /// A single conversation (§49).
 class ChatScreen extends ConsumerStatefulWidget {
@@ -145,6 +153,70 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  /// Sends a sticker, which is an ordinary message carrying one media id.
+  Future<void> _sendSticker() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? mediaId = await showStickerPicker(context);
+    if (mediaId == null) {
+      return;
+    }
+
+    try {
+      await ref.read(chatRepositoryProvider).sendMedia(
+        chatId: widget.chatId,
+        type: 'sticker',
+        mediaIds: <String>[mediaId],
+      );
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _onAction(_ChatAction action) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final OrganiseRepository organise = ref.read(organiseRepositoryProvider);
+
+    try {
+      switch (action) {
+        case _ChatAction.scheduled:
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ScheduledMessagesScreen(chatId: widget.chatId),
+            ),
+          );
+        case _ChatAction.mute:
+          // A year is how a client says "until I say otherwise" without a
+          // second flag that could fall out of step with the time.
+          await organise.setMuted(
+            widget.chatId,
+            DateTime.now().add(const Duration(days: 365)),
+          );
+          _tell(l10n.chatMuted);
+        case _ChatAction.unmute:
+          await organise.setMuted(widget.chatId, null);
+          _tell(l10n.chatUnmuted);
+        case _ChatAction.archive:
+          await organise.setFlags(widget.chatId, archived: true);
+          _tell(l10n.chatArchived);
+      }
+    } on ApiException catch (error) {
+      _tell(error.isOffline ? l10n.errorNetwork : error.message);
+    }
+  }
+
+  void _tell(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   /// Places a call and opens the in-call screen.
   Future<void> _startCall({required bool video}) async {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -210,6 +282,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             tooltip: l10n.groupsInfoTitle,
             onPressed: () => context.push('/chats/${widget.chatId}/info'),
           ),
+          PopupMenuButton<_ChatAction>(
+            onSelected: _onAction,
+            itemBuilder: (BuildContext context) =>
+                <PopupMenuEntry<_ChatAction>>[
+              PopupMenuItem<_ChatAction>(
+                value: _ChatAction.scheduled,
+                child: ListTile(
+                  leading: const Icon(Icons.schedule_outlined),
+                  title: Text(l10n.chatScheduledTitle),
+                ),
+              ),
+              PopupMenuItem<_ChatAction>(
+                value: _ChatAction.mute,
+                child: ListTile(
+                  leading: const Icon(Icons.notifications_off_outlined),
+                  title: Text(l10n.chatMute),
+                ),
+              ),
+              PopupMenuItem<_ChatAction>(
+                value: _ChatAction.unmute,
+                child: ListTile(
+                  leading: const Icon(Icons.notifications_active_outlined),
+                  title: Text(l10n.chatUnmute),
+                ),
+              ),
+              PopupMenuItem<_ChatAction>(
+                value: _ChatAction.archive,
+                child: ListTile(
+                  leading: const Icon(Icons.archive_outlined),
+                  title: Text(l10n.chatArchive),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -229,10 +335,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 itemCount: rows.length,
                 itemBuilder: (BuildContext context, int index) {
                   final MessageRow message = rows[rows.length - 1 - index];
-                  return _MessageBubble(
-                    message: message,
-                    isOutgoing: message.senderId == null ||
-                        message.senderId == currentUserId,
+                  return GestureDetector(
+                    onLongPress: () =>
+                        showMessageActions(context, ref, message),
+                    child: _MessageBubble(
+                      message: message,
+                      isOutgoing: message.senderId == null ||
+                          message.senderId == currentUserId,
+                    ),
                   );
                 },
               ),
@@ -243,6 +353,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             controller: _composer,
             onSend: _send,
             onAttach: _attach,
+            onSticker: _sendSticker,
             onVoice: _sendVoice,
             hint: l10n.chatMessageHint,
           ),
@@ -409,6 +520,7 @@ class _Composer extends StatefulWidget {
     required this.controller,
     required this.onSend,
     required this.onAttach,
+    required this.onSticker,
     required this.onVoice,
     required this.hint,
   });
@@ -416,6 +528,7 @@ class _Composer extends StatefulWidget {
   final TextEditingController controller;
   final Future<void> Function() onSend;
   final Future<void> Function() onAttach;
+  final Future<void> Function() onSticker;
   final Future<void> Function(File recording, Duration length) onVoice;
   final String hint;
 
@@ -511,6 +624,11 @@ class _ComposerState extends State<_Composer> {
                     onPressed: widget.onAttach,
                     icon: const Icon(Icons.attach_file),
                     tooltip: l10n.mediaAttach,
+                  ),
+                  IconButton(
+                    onPressed: widget.onSticker,
+                    icon: const Icon(Icons.emoji_emotions_outlined),
+                    tooltip: l10n.stickersTitle,
                   ),
                   Expanded(
                     child: TextField(

@@ -170,6 +170,9 @@ tests.
 | **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. |
 | **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats with media, voice notes and polls; contacts; groups and channels with member administration, invite links and join requests; stories with a composer and viewer; WebRTC calls; communities; the news feed with articles and bookmarks; search; notifications; profile and settings. |
 | **Mobile media** | Presigned multipart upload straight to object storage, images with reserved aspect ratio, video posters, voice notes recorded in Opus and drawn with the server's waveform, and a readiness gate so nothing renders before it is scanned and processed. |
+| **Mobile identity** | Editing the profile with partial updates, and claiming a username with availability checked as you type and the 30-day release hold explained before you rename rather than after. |
+| **Mobile bots** | Registering a bot, issuing and revoking tokens with the secret shown once behind a dialog that cannot be dismissed by a stray tap, privacy mode, and webhook registration. |
+| **Mobile organisation** | Long-press to copy, forward or pin; a sticker picker and store; scheduling with the queue and its failures visible; mute and archive. |
 | **Mobile calls** | A real WebRTC peer connection over the signalling relay, with candidate buffering, per-call TURN credentials, mute, camera and speaker controls, and incoming calls caught above the whole navigator. |
 
 ### Verified, not asserted

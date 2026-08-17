@@ -56,7 +56,7 @@ func routerEndpoints(t *testing.T, handler http.Handler) map[string]bool {
 	return found
 }
 
-func documentedEndpoints(t *testing.T) (map[string]bool, map[string]bool) {
+func documentedEndpoints(t *testing.T) (live, planned map[string]bool, successCodes map[string][]string) {
 	t.Helper()
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "protocol", "rest", "openapi.yaml"))
@@ -66,16 +66,18 @@ func documentedEndpoints(t *testing.T) (map[string]bool, map[string]bool) {
 
 	var document struct {
 		Paths map[string]map[string]struct {
-			Description string `yaml:"description"`
-			Summary     string `yaml:"summary"`
+			Description string         `yaml:"description"`
+			Summary     string         `yaml:"summary"`
+			Responses   map[string]any `yaml:"responses"`
 		} `yaml:"paths"`
 	}
 	if err := yaml.Unmarshal(raw, &document); err != nil {
 		t.Fatalf("parse openapi.yaml: %v", err)
 	}
 
-	live := make(map[string]bool)
-	planned := make(map[string]bool)
+	live = make(map[string]bool)
+	planned = make(map[string]bool)
+	successCodes = make(map[string][]string)
 	for path, operations := range document.Paths {
 		for method, operation := range operations {
 			switch strings.ToUpper(method) {
@@ -91,16 +93,54 @@ func documentedEndpoints(t *testing.T) (map[string]bool, map[string]bool) {
 				continue
 			}
 			live[key] = true
+			successCodes[key] = successStatuses(operation.Responses)
 		}
 	}
-	return live, planned
+	return live, planned, successCodes
+}
+
+// successStatuses picks the 2xx codes an operation documents.
+func successStatuses(responses map[string]any) []string {
+	var codes []string
+	for code := range responses {
+		if strings.HasPrefix(code, "2") {
+			codes = append(codes, code)
+		}
+	}
+	sort.Strings(codes)
+	return codes
+}
+
+// The server answers every request with the §66 envelope, including the ones
+// that carry nothing back: httpx.NoContent writes 200 with an empty data
+// object rather than a bodiless 204. Documenting 204 would tell a client to
+// expect no body from a call that sends one, so it is wrong in a way no
+// example would reveal — hence a test rather than a review note.
+func TestNoOperationClaimsABodilessResponse(t *testing.T) {
+	_, _, successCodes := documentedEndpoints(t)
+
+	var offenders []string
+	for endpoint, codes := range successCodes {
+		for _, code := range codes {
+			if code == "204" || code == "205" || code == "304" {
+				offenders = append(offenders, endpoint+" documents "+code)
+			}
+		}
+	}
+
+	sort.Strings(offenders)
+	if len(offenders) > 0 {
+		t.Errorf("%d operations document a bodiless success, but every SOBH "+
+			"response carries the envelope:\n  %s",
+			len(offenders), strings.Join(offenders, "\n  "))
+	}
 }
 
 func TestEveryRouteIsDocumented(t *testing.T) {
 	stack := newStack(t)
 
 	served := routerEndpoints(t, stack.app.Handler())
-	documented, planned := documentedEndpoints(t)
+	documented, planned, _ := documentedEndpoints(t)
 
 	var undocumented []string
 	for endpoint := range served {
@@ -135,7 +175,7 @@ func TestNoEndpointIsDocumentedAsLiveWithoutExisting(t *testing.T) {
 	stack := newStack(t)
 
 	served := routerEndpoints(t, stack.app.Handler())
-	documented, _ := documentedEndpoints(t)
+	documented, _, _ := documentedEndpoints(t)
 
 	var missing []string
 	for endpoint := range documented {

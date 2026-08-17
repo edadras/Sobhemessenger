@@ -1140,7 +1140,11 @@ paths:
                     that look alike in different scripts are excluded rather
                     than normalised.
       responses:
-        "204": { description: The name is now the caller's }
+        "200":
+          description: The name is now the caller's
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409":
           description: Taken, reserved, or on hold for its previous owner
@@ -1335,7 +1339,11 @@ paths:
               properties:
                 pinned: { type: boolean }
       responses:
-        "204": { description: Done; every member is told over the chat subject }
+        "200":
+          description: Done; every member is told over the chat subject
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: The caller cannot pin in this chat
@@ -1364,7 +1372,11 @@ paths:
                 pinned: { type: boolean, nullable: true }
                 archived: { type: boolean, nullable: true }
       responses:
-        "204": { description: Done }
+        "200":
+          description: Done
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: Not a member of this chat
@@ -1393,7 +1405,11 @@ paths:
                     Null unmutes. A far-future time is how a client says
                     "for ever" without a separate flag to keep in step.
       responses:
-        "204": { description: Done }
+        "200":
+          description: Done
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: Not a member of this chat
@@ -1507,7 +1523,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "204": { description: Removed from the queue }
+        "200":
+          description: Removed from the queue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -1716,7 +1736,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "204": { description: Revoked }
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -1762,7 +1786,11 @@ paths:
                   maxItems: 100
                   items: { $ref: "#/components/schemas/BotCommand" }
       responses:
-        "204": { description: Replaced }
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1838,7 +1866,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/BotID"
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/bot/me:
@@ -1955,7 +1987,11 @@ paths:
                   type: array
                   items: { $ref: "#/components/schemas/BotCommand" }
       responses:
-        "204": { description: Replaced }
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/bot/webhook:
@@ -1997,7 +2033,11 @@ paths:
       security:
         - botToken: []
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/stickers:
@@ -2172,7 +2212,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "204": { description: Installed }
+        "200":
+          description: Installed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
@@ -2184,7 +2228,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -2256,7 +2304,11 @@ paths:
                 username: { type: string, nullable: true }
                 photo_media_id: { type: string, format: uuid, nullable: true }
       responses:
-        "204": { description: Updated }
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     delete:
@@ -2265,7 +2317,11 @@ paths:
       description: Owner only. The chat is tombstoned rather than erased, so message history stays referentially intact.
       parameters: [{ $ref: "#/components/parameters/ChatID" }]
       responses:
-        "204": { description: Deleted }
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2296,7 +2352,11 @@ paths:
         keep their author.
       parameters: [{ $ref: "#/components/parameters/ChatID" }]
       responses:
-        "204": { description: Left }
+        "200":
+          description: Left
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409":
           description: The owner must transfer ownership before leaving
@@ -2369,7 +2429,11 @@ paths:
         - { $ref: "#/components/parameters/ChatID" }
         - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2397,7 +2461,11 @@ paths:
                   additionalProperties: { type: boolean }
                 custom_title: { type: string, maxLength: 32 }
       responses:
-        "204": { description: Set }
+        "200":
+          description: Set
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2417,7 +2485,11 @@ paths:
               properties:
                 user_id: { type: string, format: uuid }
       responses:
-        "204": { description: Transferred }
+        "200":
+          description: Transferred
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2447,7 +2519,11 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/ChatSettings" }
       responses:
-        "204": { description: Updated }
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2508,7 +2584,11 @@ paths:
         - { $ref: "#/components/parameters/ChatID" }
         - { in: path, name: linkID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Revoked; it stops working immediately }
+        "200":
+          description: Revoked; it stops working immediately
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2550,7 +2630,11 @@ paths:
               properties:
                 approve: { type: boolean }
       responses:
-        "204": { description: Resolved }
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2565,7 +2649,11 @@ paths:
         - { $ref: "#/components/parameters/ChatID" }
         - { in: path, name: messageID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Counted }
+        "200":
+          description: Counted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/chats/{chatID}/statistics:
@@ -2663,7 +2751,11 @@ paths:
       parameters:
         - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Joined }
+        "200":
+          description: Joined
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2674,7 +2766,11 @@ paths:
       parameters:
         - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Left }
+        "200":
+          description: Left
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/communities/{communityID}/rooms:
@@ -2695,7 +2791,11 @@ paths:
                 section: { type: string, default: general }
                 position: { type: integer, default: 0 }
       responses:
-        "204": { description: Added }
+        "200":
+          description: Added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2708,7 +2808,11 @@ paths:
         - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/ChatID" }
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2800,7 +2904,11 @@ paths:
               properties:
                 user_ids: { type: array, items: { type: string, format: uuid } }
       responses:
-        "204": { description: Replaced }
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/stories/{storyID}/view:
@@ -2817,7 +2925,11 @@ paths:
               properties:
                 reaction: { type: string, nullable: true }
       responses:
-        "204": { description: Recorded }
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2851,7 +2963,11 @@ paths:
       parameters:
         - { in: path, name: storyID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Deleted }
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -2957,7 +3073,11 @@ paths:
       parameters:
         - { in: path, name: pollID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Closed }
+        "200":
+          description: Closed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3093,7 +3213,11 @@ paths:
       parameters:
         - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Accepted; the other side is told over the call subject }
+        "200":
+          description: Accepted; the other side is told over the call subject
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/calls/{callID}/reject:
@@ -3103,7 +3227,11 @@ paths:
       parameters:
         - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Rejected }
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/calls/{callID}/end:
@@ -3120,7 +3248,11 @@ paths:
               properties:
                 reason: { type: string, default: hangup }
       responses:
-        "204": { description: Ended }
+        "200":
+          description: Ended
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/calls/{callID}/signal:
@@ -3145,7 +3277,11 @@ paths:
                 type: { type: string, enum: [offer, answer, ice-candidate] }
                 payload: { type: object, additionalProperties: true }
       responses:
-        "204": { description: Relayed }
+        "200":
+          description: Relayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -3166,7 +3302,11 @@ paths:
                 video_enabled: { type: boolean, nullable: true }
                 screen_sharing: { type: boolean, nullable: true }
       responses:
-        "204": { description: Announced to the other participants }
+        "200":
+          description: Announced to the other participants
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/news:
@@ -3279,7 +3419,11 @@ paths:
       parameters:
         - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Bookmarked }
+        "200":
+          description: Bookmarked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     delete:
       tags: [News]
@@ -3287,7 +3431,11 @@ paths:
       parameters:
         - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/news-reader/follows:
@@ -3308,7 +3456,11 @@ paths:
                 author_id: { type: string, format: uuid, nullable: true }
                 follow: { type: boolean }
       responses:
-        "204": { description: Applied }
+        "200":
+          description: Applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -3492,7 +3644,11 @@ paths:
       parameters:
         - { in: path, name: categoryID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Deleted }
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
@@ -3608,7 +3764,11 @@ paths:
                   items: { type: string, format: uuid }
                   description: An empty or absent list marks everything read.
       responses:
-        "204": { description: Marked }
+        "200":
+          description: Marked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/notifications/settings:
@@ -3635,7 +3795,11 @@ paths:
           application/json:
             schema: { type: object, additionalProperties: true }
       responses:
-        "204": { description: Updated }
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/notifications/tokens:
@@ -3657,7 +3821,11 @@ paths:
                 token: { type: string }
                 locale: { type: string, enum: [fa, en, tr, ar] }
       responses:
-        "204": { description: Registered }
+        "200":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     delete:
       tags: [Notifications]
@@ -3673,7 +3841,11 @@ paths:
                 provider: { type: string }
                 token: { type: string }
       responses:
-        "204": { description: Removed }
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/v1/search:
@@ -3814,7 +3986,11 @@ paths:
                 status: { type: string, enum: [active, suspended, deleted] }
                 reason: { type: string }
       responses:
-        "204": { description: Applied and recorded in the audit log }
+        "200":
+          description: Applied and recorded in the audit log
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3834,7 +4010,11 @@ paths:
               properties:
                 role: { type: string }
       responses:
-        "204": { description: Granted }
+        "200":
+          description: Granted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3846,7 +4026,11 @@ paths:
         - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
         - { in: path, name: roleKey, required: true, schema: { type: string } }
       responses:
-        "204": { description: Revoked }
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3890,7 +4074,11 @@ paths:
                 status: { type: string, enum: [reviewing, resolved, dismissed] }
                 resolution: { type: string }
       responses:
-        "204": { description: Resolved }
+        "200":
+          description: Resolved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3951,7 +4139,11 @@ paths:
       parameters:
         - { in: path, name: banID, required: true, schema: { type: string, format: uuid } }
       responses:
-        "204": { description: Lifted }
+        "200":
+          description: Lifted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -3972,7 +4164,11 @@ paths:
                 rollout_percentage: { type: integer, minimum: 0, maximum: 100 }
                 payload: { type: object, additionalProperties: true }
       responses:
-        "204": { description: Set }
+        "200":
+          description: Set
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 

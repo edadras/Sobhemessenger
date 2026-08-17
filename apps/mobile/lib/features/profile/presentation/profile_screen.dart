@@ -6,11 +6,14 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../../auth/session_controller.dart';
+import '../../bots/presentation/bots_screen.dart';
 import '../../communities/presentation/communities_screen.dart';
 import '../../contacts/presentation/contacts_screen.dart';
 import '../../notifications/presentation/notifications_screen.dart';
-import '../../settings/data/account_repository.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../../stickers/presentation/sticker_picker.dart';
+import '../data/profile_repository.dart';
+import 'edit_profile_screen.dart';
 
 /// The user's own profile and the entry point to settings (§43).
 class ProfileScreen extends ConsumerWidget {
@@ -20,12 +23,21 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final SessionState session = ref.watch(sessionControllerProvider);
-    final AsyncValue<List<UserDevice>> devices = ref.watch(deviceListProvider);
+    final AsyncValue<SelfProfile> profile = ref.watch(selfProfileProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(l10n.profileTitle),
         actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: l10n.profileEditTitle,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const EditProfileScreen(),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: l10n.settingsTitle,
@@ -42,24 +54,45 @@ class ProfileScreen extends ConsumerWidget {
             child: Column(
               children: <Widget>[
                 SobhAvatar(
-                  name: l10n.appName,
+                  name: profile.maybeWhen(
+                    orElse: () => l10n.appName,
+                    data: (SelfProfile self) => self.displayName.isEmpty
+                        ? l10n.appName
+                        : self.displayName,
+                  ),
                   radius: SobhSizes.avatarLarge / 2,
                 ),
                 const SizedBox(height: SobhSpacing.md),
                 Text(
-                  // The current device name is the most concrete identity the
-                  // client holds without a profile endpoint call.
-                  devices.maybeWhen(
+                  profile.maybeWhen(
                     orElse: () => l10n.profileTitle,
-                    data: (List<UserDevice> rows) => rows
-                        .where((UserDevice device) => device.isCurrent)
-                        .map((UserDevice device) => device.name)
-                        .firstWhere(
-                          (String name) => name.isNotEmpty,
-                          orElse: () => l10n.profileTitle,
-                        ),
+                    data: (SelfProfile self) => self.displayName.isEmpty
+                        ? l10n.profileTitle
+                        : self.displayName,
                   ),
                   style: Theme.of(context).textTheme.titleLarge,
+                ),
+                profile.maybeWhen(
+                  orElse: () => const SizedBox.shrink(),
+                  data: (SelfProfile self) => Column(
+                    children: <Widget>[
+                      if (self.username != null)
+                        Text(
+                          self.handle,
+                          style: TextStyle(
+                            color: SobhTheme.of(context).textSecondary,
+                          ),
+                        ),
+                      if (self.about.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: SobhSpacing.xl,
+                            vertical: SobhSpacing.sm,
+                          ),
+                          child: Text(self.about, textAlign: TextAlign.center),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -79,6 +112,23 @@ class ProfileScreen extends ConsumerWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const BlockedContactsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.smart_toy_outlined),
+            title: Text(l10n.botsTitle),
+            subtitle: Text(l10n.botsSubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const BotsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.emoji_emotions_outlined),
+            title: Text(l10n.stickersTitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const StickerStoreScreen(),
               ),
             ),
           ),
