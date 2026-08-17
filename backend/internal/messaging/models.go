@@ -86,6 +86,35 @@ type Chat struct {
 	// Populated for the requesting member only.
 	Membership  *Membership `json:"membership,omitempty"`
 	LastMessage *Message    `json:"last_message,omitempty"`
+
+	// Peer is the other person in a one-to-one conversation, private or secret.
+	//
+	// Such a chat has no title of its own — `chats.title` stays empty — because
+	// it is named after whoever is on the other side, and that differs for each
+	// of the two members. Resolving it here rather than leaving each client to
+	// look the user up means the name is decided once: otherwise every client
+	// re-implements "which of these two members is not me", and a chat list
+	// that renders nameless rows is the failure mode when one of them gets it
+	// wrong.
+	//
+	// It is also what a client needs to open an encrypted chat, which is
+	// addressed to a person rather than to a conversation.
+	Peer *ChatPeer `json:"peer,omitempty"`
+}
+
+// ChatPeer is the other member of a one-to-one conversation.
+//
+// Deliberately not a full profile. A chat list needs a name, a picture and an
+// id to act on. Fields the viewer's privacy settings govern — last seen, the
+// phone number — are not here: they belong to the profile endpoint, which
+// resolves those rules per viewer. Copying them into the chat list would be a
+// second, unguarded way to read them.
+type ChatPeer struct {
+	UserID      uuid.UUID  `json:"user_id"`
+	DisplayName string     `json:"display_name"`
+	Username    *string    `json:"username,omitempty"`
+	AvatarID    *uuid.UUID `json:"avatar_media_id,omitempty"`
+	IsBot       bool       `json:"is_bot"`
 }
 
 // Membership is the caller's own state in a chat.

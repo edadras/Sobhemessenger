@@ -497,3 +497,100 @@ func TestHistoryPagesBackwardsBySequence(t *testing.T) {
 		t.Errorf("page 2 starts at seq %d, want below the cursor %d", second[0].Seq, cursor)
 	}
 }
+
+func TestOneToOneChatsCarryTheirPeer(t *testing.T) {
+	// A private chat has no title of its own, so without the resolved peer the
+	// whole chat list renders nameless — the single most visible thing a
+	// messenger can get wrong. The peer is also what a client needs to open an
+	// encrypted chat, which is addressed to a person rather than a chat.
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE user_profiles SET display_name = $2 WHERE user_id = $1`,
+		bob, "باب"); err != nil {
+		t.Fatalf("give bob a display name: %v", err)
+	}
+
+	privateID, _, err := repo.EnsurePrivateChat(ctx, alice, bob)
+	if err != nil {
+		t.Fatalf("EnsurePrivateChat: %v", err)
+	}
+
+	chats, err := repo.ListChats(ctx, alice, 50, nil)
+	if err != nil {
+		t.Fatalf("ListChats: %v", err)
+	}
+
+	found := false
+	for _, chat := range chats {
+		if chat.ID != privateID {
+			continue
+		}
+		found = true
+		if chat.Peer == nil {
+			t.Fatal("the private chat came back without a peer")
+		}
+		// Alice must see Bob, not herself.
+		if chat.Peer.UserID != bob {
+			t.Errorf("peer = %s, want bob (%s)", chat.Peer.UserID, bob)
+		}
+		if chat.Peer.DisplayName != "باب" {
+			t.Errorf("peer display name = %q, want %q", chat.Peer.DisplayName, "باب")
+		}
+	}
+	if !found {
+		t.Fatal("the private chat was not in the list")
+	}
+
+	// And the same chat from Bob's side names Alice, not himself.
+	fromBob, err := repo.ListChats(ctx, bob, 50, nil)
+	if err != nil {
+		t.Fatalf("ListChats for bob: %v", err)
+	}
+	for _, chat := range fromBob {
+		if chat.ID == privateID {
+			if chat.Peer == nil || chat.Peer.UserID != alice {
+				t.Errorf("bob's view names %v, want alice (%s)", chat.Peer, alice)
+			}
+		}
+	}
+}
+
+func TestGroupChatsHaveNoPeer(t *testing.T) {
+	// The peer only means something for a two-person conversation. A group
+	// naming itself after whichever member the query happened to reach first
+	// would be worse than having no name at all.
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+
+	var groupID uuid.UUID
+	if err := db.Pool.QueryRow(ctx,
+		`INSERT INTO chats (type, creator_id, title, member_count) VALUES ('group', $1, 'گروه', 2) RETURNING id`,
+		alice).Scan(&groupID); err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO chat_members (chat_id, user_id, role)
+		VALUES ($1, $2, 'owner'), ($1, $3, 'member')`, groupID, alice, bob); err != nil {
+		t.Fatalf("add group members: %v", err)
+	}
+
+	chats, err := repo.ListChats(ctx, alice, 50, nil)
+	if err != nil {
+		t.Fatalf("ListChats: %v", err)
+	}
+	for _, chat := range chats {
+		if chat.ID == groupID && chat.Peer != nil {
+			t.Errorf("the group came back with a peer: %+v", chat.Peer)
+		}
+	}
+}

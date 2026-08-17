@@ -11,6 +11,13 @@ import '../../../core/storage/local_database.dart';
 import '../../../core/websocket/socket_client.dart';
 import '../../auth/session_controller.dart';
 
+/// How many conversations one chat-list request asks for.
+///
+/// The server's own maximum. Asking for as many as it will give makes the
+/// common case — a person with fewer chats than this — a complete list in one
+/// request, which is what lets stale rows be pruned safely.
+const int chatPageSize = 100;
+
 /// Offline-first message store (§7, §46).
 ///
 /// Sending is always local-first: the message is written to the database and
@@ -50,7 +57,91 @@ class ChatRepository {
       '/chats/private',
       body: <String, dynamic>{'user_id': userId},
     );
-    return result['chat_id'] as String;
+    final String chatId = result['chat_id'] as String;
+    // The new chat has to reach the list, and the list is local. Without this
+    // the conversation opens but never appears among the others until some
+    // later refresh happens to run.
+    unawaited(syncChats());
+    return chatId;
+  }
+
+  /// Fetches the conversation list from the server into the local database.
+  ///
+  /// The list the user sees streams from local storage so it survives being
+  /// offline, and this is the only thing that puts anything in it. Chats
+  /// created on another device, groups the user was added to, and the names of
+  /// one-to-one conversations all arrive here.
+  ///
+  /// Failures are the caller's to report: the list is already on screen from
+  /// the cache, so a refresh that cannot reach the server is a stale list
+  /// rather than a broken one.
+  Future<void> syncChats() async {
+    final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
+      '/chats',
+      query: <String, dynamic>{'limit': chatPageSize},
+    );
+    final List<dynamic> raw =
+        data['chats'] as List<dynamic>? ?? const <dynamic>[];
+
+    final List<ChatsCompanion> rows = <ChatsCompanion>[];
+    final List<String> ids = <String>[];
+
+    for (final dynamic entry in raw) {
+      final Map<String, dynamic> chat = entry as Map<String, dynamic>;
+      final Map<String, dynamic> membership =
+          chat['membership'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+      final Map<String, dynamic>? peer =
+          chat['peer'] as Map<String, dynamic>?;
+
+      final String id = chat['id'] as String;
+      ids.add(id);
+      rows.add(
+        ChatsCompanion.insert(
+          id: id,
+          type: chat['type'] as String,
+          title: Value<String>(chat['title'] as String? ?? ''),
+          photoMediaId: Value<String?>(chat['photo_media_id'] as String?),
+          lastSeq: Value<int>((chat['last_seq'] as num?)?.toInt() ?? 0),
+          lastReadSeq:
+              Value<int>((membership['last_read_seq'] as num?)?.toInt() ?? 0),
+          unreadCount:
+              Value<int>((membership['unread_count'] as num?)?.toInt() ?? 0),
+          mentionCount:
+              Value<int>((membership['mention_count'] as num?)?.toInt() ?? 0),
+          lastMessageAt: Value<DateTime?>(
+            chat['last_message_at'] == null
+                ? null
+                : DateTime.parse(chat['last_message_at'] as String).toLocal(),
+          ),
+          isPinned: Value<bool>(membership['is_pinned'] as bool? ?? false),
+          isArchived: Value<bool>(membership['is_archived'] as bool? ?? false),
+          mutedUntil: Value<DateTime?>(
+            membership['muted_until'] == null
+                ? null
+                : DateTime.parse(membership['muted_until'] as String).toLocal(),
+          ),
+          role: Value<String>(membership['role'] as String? ?? 'member'),
+          memberCount: Value<int>((chat['member_count'] as num?)?.toInt() ?? 0),
+          // Present for a private or secret chat, absent for a group. It is
+          // what names the row, since such a chat has no title of its own.
+          peerUserId: Value<String?>(peer?['user_id'] as String?),
+          peerName: Value<String?>(peer?['display_name'] as String?),
+          peerAvatarMediaId:
+              Value<String?>(peer?['avatar_media_id'] as String?),
+        ),
+      );
+    }
+
+    await _db.upsertChats(rows);
+
+    // Pruning removes conversations left or deleted on another device, which
+    // would otherwise sit in the list for ever. It is only safe when this page
+    // is provably the whole list: a full page means there may be more, and
+    // deleting everything the server did not mention would throw away real
+    // conversations. Erring towards a stale row rather than a lost one.
+    if (raw.length < chatPageSize) {
+      await _db.pruneChatsNotIn(ids);
+    }
   }
 
   /// Queues a message. Returns as soon as it is stored locally — the UI never

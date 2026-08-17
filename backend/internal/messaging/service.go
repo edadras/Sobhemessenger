@@ -248,6 +248,21 @@ func (s *Service) validateSend(in *SendInput) error {
 }
 
 func (s *Service) checkSendPermission(chatCtx *ChatContext, in SendInput) error {
+	// An encrypted chat is not reachable through this path, ever (§23, §24).
+	//
+	// Nothing else here would have stopped it: the sender is a member, has the
+	// send permission, and the row would have been written to `messages` in
+	// cleartext — the conversation would silently stop being encrypted, with no
+	// error and nothing on either screen to say so. That is the worst possible
+	// failure for this feature, so it is refused at the server rather than left
+	// to the client to avoid. A client is a thing an attacker gets to rewrite.
+	//
+	// Forward routes every message through Send, so it is covered here too.
+	if chatCtx.ChatType == ChatSecret {
+		return httpx.Validation("That chat is encrypted, so messages must be sent through the encrypted path").
+			WithField("chat_id", "is a secret chat")
+	}
+
 	permissions := chatCtx.Permissions
 	if !permissions.SendMessages {
 		return httpx.Forbidden(httpx.CodePermissionDenied, "You cannot post in this chat")

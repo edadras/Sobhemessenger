@@ -209,14 +209,31 @@ func (r *Repository) ensureSelfChat(ctx context.Context, userID uuid.UUID) (uuid
 
 // ListChats returns the caller's chat list, most recently active first.
 func (r *Repository) ListChats(ctx context.Context, userID uuid.UUID, limit int, before *time.Time) ([]Chat, error) {
+	// The LATERAL resolves the other person in a one-to-one chat. Such a chat
+	// has no title of its own, so without this every private and secret
+	// conversation arrives nameless and each client has to work out which
+	// member is not the viewer. It is restricted to those two types and to one
+	// row, so it costs an index lookup on chats that have a peer and nothing at
+	// all on those that do not.
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT c.id, c.type, c.community_id, c.title, c.description, c.username,
 		       c.photo_media_id, c.creator_id, c.last_seq, c.last_message_at,
 		       c.member_count, c.is_public, c.created_at,
 		       m.role, m.permissions, m.last_read_seq, m.unread_count, m.mention_count,
-		       m.is_pinned, m.is_archived, m.muted_until, m.draft, m.joined_at
+		       m.is_pinned, m.is_archived, m.muted_until, m.draft, m.joined_at,
+		       peer.user_id, peer.display_name, peer.username, peer.avatar_media_id, peer.is_bot
 		FROM chat_members m
 		JOIN chats c ON c.id = m.chat_id
+		LEFT JOIN LATERAL (
+			SELECT u.id AS user_id,
+			       COALESCE(NULLIF(p.display_name, ''), u.username, '') AS display_name,
+			       u.username, p.avatar_media_id, u.is_bot
+			FROM chat_members pm
+			JOIN users u ON u.id = pm.user_id AND u.deleted_at IS NULL
+			LEFT JOIN user_profiles p ON p.user_id = u.id
+			WHERE pm.chat_id = c.id AND pm.user_id <> $1 AND pm.left_at IS NULL
+			LIMIT 1
+		) peer ON c.type IN ('private', 'secret')
 		WHERE m.user_id = $1 AND m.left_at IS NULL AND c.deleted_at IS NULL
 		  AND ($3::timestamptz IS NULL OR c.last_message_at < $3)
 		ORDER BY m.is_pinned DESC, c.last_message_at DESC NULLS LAST, c.created_at DESC
@@ -232,16 +249,35 @@ func (r *Repository) ListChats(ctx context.Context, userID uuid.UUID, limit int,
 			chat     Chat
 			member   Membership
 			rawPerms []byte
+			peer     ChatPeer
+			peerID   *uuid.UUID
+			peerName *string
+			peerBot  *bool
 		)
 		if err := rows.Scan(&chat.ID, &chat.Type, &chat.CommunityID, &chat.Title, &chat.Description,
 			&chat.Username, &chat.PhotoMediaID, &chat.CreatorID, &chat.LastSeq, &chat.LastMessageAt,
 			&chat.MemberCount, &chat.IsPublic, &chat.CreatedAt,
 			&member.Role, &rawPerms, &member.LastReadSeq, &member.UnreadCount, &member.MentionCount,
-			&member.IsPinned, &member.IsArchived, &member.MutedUntil, &member.Draft, &member.JoinedAt); err != nil {
+			&member.IsPinned, &member.IsArchived, &member.MutedUntil, &member.Draft, &member.JoinedAt,
+			&peerID, &peerName, &peer.Username, &peer.AvatarID, &peerBot); err != nil {
 			return nil, err
 		}
 		member.Permissions = applyOverrides(PermissionsForRole(member.Role, chat.Type), rawPerms)
 		chat.Membership = &member
+
+		// Absent for a group or channel, and for a one-to-one chat whose other
+		// member has deleted their account — which is a real state, not an
+		// error, and leaves the conversation readable but nameless.
+		if peerID != nil {
+			peer.UserID = *peerID
+			if peerName != nil {
+				peer.DisplayName = *peerName
+			}
+			if peerBot != nil {
+				peer.IsBot = *peerBot
+			}
+			chat.Peer = &peer
+		}
 		chats = append(chats, chat)
 	}
 	return chats, rows.Err()
@@ -743,14 +779,27 @@ func (r *Repository) SetPinned(ctx context.Context, messageID uuid.UUID, pinned 
 }
 
 // SetDraft stores the caller's unsent text so it follows them across devices.
+// SetDraft stores a half-written message so it survives closing the app.
+//
+// It refuses to do so for an encrypted chat. A draft is plaintext, and
+// `chat_members.draft` is an ordinary server-side column: storing one would put
+// the beginning of a secret message on the server in clear, which is exactly
+// what the conversation exists to prevent. The condition is part of the UPDATE
+// rather than a lookup beforehand, so enforcing it costs nothing — drafts are
+// written on a keystroke timer and a second round trip each time would be felt.
 func (r *Repository) SetDraft(ctx context.Context, chatID, userID uuid.UUID, draft string) error {
-	tag, err := r.db.Pool.Exec(ctx,
-		`UPDATE chat_members SET draft = $3 WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+	tag, err := r.db.Pool.Exec(ctx, `
+		UPDATE chat_members m SET draft = $3
+		FROM chats c
+		WHERE m.chat_id = $1 AND m.user_id = $2 AND m.left_at IS NULL
+		  AND c.id = m.chat_id AND c.type <> 'secret'`,
 		chatID, userID, draft)
 	if err != nil {
 		return fmt.Errorf("messaging: set draft: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
+		// Not a member, or the chat is encrypted. The caller turns this into a
+		// message; both are a refusal to store the draft.
 		return ErrNotMember
 	}
 	return nil

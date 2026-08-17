@@ -1,23 +1,64 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/storage/local_database.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/websocket/socket_client.dart';
+import '../../../core/widgets/async_states.dart';
 import '../../auth/session_controller.dart';
+import '../../secretchat/presentation/secret_chat_screen.dart';
 import '../../stories/presentation/stories_tray.dart';
 import '../data/chat_repository.dart';
 
 /// The conversation list (§48).
-class ChatListScreen extends ConsumerWidget {
+class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatListScreen> createState() => _ChatListScreenState();
+}
+
+class _ChatListScreenState extends ConsumerState<ChatListScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // The list on screen streams from local storage, which is what makes it
+    // work offline — but something has to put the conversations there in the
+    // first place. Without this the list is permanently empty on a new install.
+    unawaited(_sync());
+  }
+
+  /// Refreshes the list from the server.
+  ///
+  /// A failure is deliberately quiet when there is already a list to show: the
+  /// cached conversations are still correct, and an error banner over them
+  /// would suggest otherwise. It is only surfaced when the list is empty, where
+  /// the difference between "no conversations" and "could not load them"
+  /// matters.
+  Future<void> _sync() async {
+    try {
+      await ref.read(chatRepositoryProvider).syncChats();
+      if (mounted) {
+        setState(() => _failure = null);
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        setState(() => _failure = error);
+      }
+    }
+  }
+
+  ApiException? _failure;
+
+  @override
+  Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<List<ChatRow>> chats = ref.watch(chatListProvider);
 
@@ -50,17 +91,29 @@ class ChatListScreen extends ConsumerWidget {
                   _ErrorState(message: l10n.errorGeneric),
               data: (List<ChatRow> rows) {
                 if (rows.isEmpty) {
+                  // With nothing cached, a failed fetch and a genuinely empty
+                  // account look identical to the user unless they are told
+                  // apart — and only one of them is worth retrying.
+                  if (_failure != null) {
+                    return SobhErrorState(
+                      error: _failure!,
+                      onRetry: _sync,
+                    );
+                  }
                   return _EmptyState(
                     title: l10n.chatsEmptyTitle,
                     body: l10n.chatsEmptyBody,
                   );
                 }
-                return ListView.separated(
-                  itemCount: rows.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(indent: SobhSpacing.xxl + SobhSpacing.lg),
-                  itemBuilder: (BuildContext context, int index) =>
-                      _ChatTile(chat: rows[index]),
+                return RefreshIndicator(
+                  onRefresh: _sync,
+                  child: ListView.separated(
+                    itemCount: rows.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(indent: SobhSpacing.xxl + SobhSpacing.lg),
+                    itemBuilder: (BuildContext context, int index) =>
+                        _ChatTile(chat: rows[index]),
+                  ),
                 );
               },
             ),
@@ -76,22 +129,79 @@ class _ChatTile extends StatelessWidget {
 
   final ChatRow chat;
 
+  /// What to call this conversation.
+  ///
+  /// A private or secret chat has no title of its own — it is named after the
+  /// person on the other side, which the server resolves because it differs for
+  /// each of the two members. The question mark is the last resort for a peer
+  /// whose account has been deleted.
+  String get _name {
+    if (chat.title.isNotEmpty) {
+      return chat.title;
+    }
+    return chat.peerName?.isNotEmpty ?? false ? chat.peerName! : '';
+  }
+
+  bool get _isSecret => chat.type == 'secret';
+
+  void _open(BuildContext context) {
+    // An encrypted conversation must not open the ordinary screen. That screen
+    // is built on the local message store and the plaintext send path — the
+    // server now refuses both for a secret chat, so it would be an empty
+    // conversation that errors on every send.
+    if (_isSecret) {
+      final String? peerUserId = chat.peerUserId;
+      if (peerUserId == null) {
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => SecretChatScreen(
+            chatId: chat.id,
+            peerUserId: peerUserId,
+            peerName: _name,
+          ),
+        ),
+      );
+      return;
+    }
+    context.go('/chats/${chat.id}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final SobhPalette palette = SobhTheme.of(context);
     final TextTheme text = Theme.of(context).textTheme;
+    final String name = _name;
 
     return ListTile(
-      onTap: () => context.go('/chats/${chat.id}'),
+      onTap: () => _open(context),
       leading: CircleAvatar(
         radius: SobhSizes.avatarMedium / 2,
         backgroundColor: palette.surfaceVariant,
         child: Text(
-          chat.title.isEmpty ? '؟' : chat.title.characters.first,
+          name.isEmpty ? '؟' : name.characters.first,
           style: text.titleMedium,
         ),
       ),
-      title: Text(chat.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Row(
+        children: <Widget>[
+          if (_isSecret) ...<Widget>[
+            // The lock is how someone tells the two conversations with the same
+            // person apart at a glance, which decides what they are willing to
+            // type into it.
+            Icon(
+              Icons.lock_outline,
+              size: SobhSizes.iconSmall,
+              color: palette.success,
+            ),
+            const SizedBox(width: SobhSpacing.xs),
+          ],
+          Expanded(
+            child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
       subtitle: chat.draft.isNotEmpty
           ? Text(
               chat.draft,

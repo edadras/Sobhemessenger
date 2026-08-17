@@ -1008,3 +1008,140 @@ func TestAClaimedPostIsNotOfferedAgainWhileItsLeaseIsLive(t *testing.T) {
 		t.Fatalf("%d of %d posts came back after the lease expired", recovered, posts)
 	}
 }
+
+// secretChat makes an encrypted two-person chat, as POST /secret/chats does.
+func secretChat(t *testing.T, db *database.DB, a, b uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+
+	var chatID uuid.UUID
+	if err := db.Pool.QueryRow(ctx,
+		`INSERT INTO chats (type, creator_id, member_count) VALUES ('secret', $1, 2) RETURNING id`,
+		a).Scan(&chatID); err != nil {
+		t.Fatalf("create secret chat: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO chat_members (chat_id, user_id, role)
+		VALUES ($1, $2, 'member'), ($1, $3, 'member')`, chatID, a, b); err != nil {
+		t.Fatalf("add secret chat members: %v", err)
+	}
+	return chatID
+}
+
+func TestPlaintextCannotBeSentIntoASecretChat(t *testing.T) {
+	// The failure this prevents is the quiet one: the sender is a member and
+	// has every permission, so without the guard the message is written to
+	// `messages` in clear, the conversation stops being encrypted, and nothing
+	// on either screen says so.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID := secretChat(t, db, alice, bob)
+
+	_, err := service.Send(ctx, messaging.SendInput{
+		ChatID:          chatID,
+		SenderID:        alice,
+		ClientMessageID: uuid.New(),
+		Type:            messaging.TypeText,
+		Content:         "this must never be stored in clear",
+	})
+	if err == nil {
+		t.Fatal("Send into a secret chat succeeded, want a refusal")
+	}
+
+	// The refusal must be the reason, not an accident of some other check.
+	var stored int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT count(*)::int FROM messages WHERE chat_id = $1`, chatID).Scan(&stored); err != nil {
+		t.Fatalf("count stored messages: %v", err)
+	}
+	if stored != 0 {
+		t.Errorf("%d plaintext messages reached an encrypted chat", stored)
+	}
+}
+
+func TestForwardingIntoASecretChatIsRefused(t *testing.T) {
+	// Forward routes through Send, so this asserts the guard is not bypassed by
+	// a second door into the same table.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	source := groupChat(t, db, alice, bob)
+	secret := secretChat(t, db, alice, bob)
+
+	original, err := service.Send(ctx, messaging.SendInput{
+		ChatID:          source,
+		SenderID:        alice,
+		ClientMessageID: uuid.New(),
+		Type:            messaging.TypeText,
+		Content:         "an ordinary message",
+	})
+	if err != nil {
+		t.Fatalf("seed a message to forward: %v", err)
+	}
+
+	if _, err := service.Forward(ctx, messaging.ForwardParams{
+		FromChatID: source,
+		ToChatID:   secret,
+		SenderID:   alice,
+		MessageIDs: []uuid.UUID{original.ID},
+	}); err == nil {
+		t.Fatal("forwarding into a secret chat succeeded, want a refusal")
+	}
+
+	var stored int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT count(*)::int FROM messages WHERE chat_id = $1`, secret).Scan(&stored); err != nil {
+		t.Fatalf("count stored messages: %v", err)
+	}
+	if stored != 0 {
+		t.Errorf("%d forwarded messages reached an encrypted chat", stored)
+	}
+}
+
+func TestDraftsAreNotStoredForASecretChat(t *testing.T) {
+	// A draft is plaintext in an ordinary server-side column. Storing one would
+	// put the beginning of a secret message on the server in clear.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	secret := secretChat(t, db, alice, bob)
+	ordinary := groupChat(t, db, alice, bob)
+
+	if err := service.SetDraft(ctx, secret, alice, "half a secret"); err == nil {
+		t.Error("SetDraft on a secret chat succeeded, want a refusal")
+	}
+
+	var draft string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT draft FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+		secret, alice).Scan(&draft); err != nil {
+		t.Fatalf("read the draft: %v", err)
+	}
+	if draft != "" {
+		t.Errorf("a draft was stored for an encrypted chat: %q", draft)
+	}
+
+	// And an ordinary chat still works, so the guard is not simply breaking
+	// drafts for everyone.
+	if err := service.SetDraft(ctx, ordinary, alice, "half an ordinary message"); err != nil {
+		t.Fatalf("SetDraft on an ordinary chat: %v", err)
+	}
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT draft FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+		ordinary, alice).Scan(&draft); err != nil {
+		t.Fatalf("read the ordinary draft: %v", err)
+	}
+	if draft != "half an ordinary message" {
+		t.Errorf("ordinary draft = %q, want it stored", draft)
+	}
+}

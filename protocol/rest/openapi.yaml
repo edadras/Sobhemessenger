@@ -4786,6 +4786,36 @@ components:
         member_count: { type: integer }
         is_public: { type: boolean }
         membership: { $ref: "#/components/schemas/Membership" }
+        peer: { $ref: "#/components/schemas/ChatPeer" }
+
+    ChatPeer:
+      type: object
+      description: |
+        The other person in a one-to-one conversation, present for `private` and
+        `secret` chats and absent for groups and channels.
+
+        Such a chat has no title of its own — `title` is empty — because it is
+        named after whoever is on the other side, and that differs for each of
+        the two members. The server resolves it so the name is decided once
+        rather than by each client re-implementing "which member is not me".
+
+        It is also what a client needs to open an encrypted chat, which is
+        addressed to a person rather than to a conversation.
+
+        Absent as well when the other member has deleted their account, which
+        leaves the conversation readable but nameless.
+
+        Fields governed by the viewer's privacy settings — last seen, the phone
+        number — are deliberately not here. They belong to the profile endpoint,
+        which resolves those rules per viewer.
+      properties:
+        user_id: { type: string, format: uuid }
+        display_name:
+          type: string
+          description: The profile name, falling back to the username
+        username: { type: string }
+        avatar_media_id: { type: string, format: uuid }
+        is_bot: { type: boolean }
 
     Membership:
       type: object

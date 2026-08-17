@@ -38,6 +38,15 @@ class Chats extends Table {
   TextColumn get role => text().withDefault(const Constant('member'))();
   IntColumn get memberCount => integer().withDefault(const Constant(0))();
 
+  /// The other person in a one-to-one conversation, resolved by the server.
+  ///
+  /// A private or secret chat has no title of its own, so [title] is empty for
+  /// them and the name shown comes from here. The id is also what opening an
+  /// encrypted chat needs, since a secret chat is addressed to a person.
+  TextColumn get peerUserId => text().nullable()();
+  TextColumn get peerName => text().nullable()();
+  TextColumn get peerAvatarMediaId => text().nullable()();
+
   @override
   Set<Column<Object>> get primaryKey => <Column<Object>>{id};
 }
@@ -158,7 +167,7 @@ class LocalDatabase extends _$LocalDatabase {
   LocalDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -175,6 +184,14 @@ class LocalDatabase extends _$LocalDatabase {
           // meet.
           if (from < 2) {
             await m.addColumn(messages, messages.replyMarkupJson);
+          }
+          // 3: the resolved peer of a one-to-one chat. Existing rows get null
+          // and are filled in by the next chat-list refresh, which is a blank
+          // name for a moment rather than a discarded cache.
+          if (from < 3) {
+            await m.addColumn(chats, chats.peerUserId);
+            await m.addColumn(chats, chats.peerName);
+            await m.addColumn(chats, chats.peerAvatarMediaId);
           }
         },
         beforeOpen: (OpeningDetails details) async {
@@ -209,6 +226,43 @@ class LocalDatabase extends _$LocalDatabase {
           ..limit(limit))
         .watch()
         .map((List<MessageRow> rows) => rows.reversed.toList());
+  }
+
+  /// Stores the chat list the server returned.
+  ///
+  /// Written in one transaction so the list never renders half-updated, and as
+  /// an upsert that leaves [Chats.syncedSeq] and [Chats.draft] alone: those are
+  /// this device's own state, and the server's view of the chat knows nothing
+  /// about how far this device has backfilled or what is half-typed in it.
+  Future<void> upsertChats(List<ChatsCompanion> rows) async {
+    if (rows.isEmpty) {
+      return;
+    }
+    await batch((Batch batch) {
+      for (final ChatsCompanion row in rows) {
+        batch.insert(
+          chats,
+          row,
+          onConflict: DoUpdate(
+            (_) => row,
+            target: <Column<Object>>[chats.id],
+          ),
+        );
+      }
+    });
+  }
+
+  /// Removes local chats the server no longer lists.
+  ///
+  /// A conversation the user left or deleted on another device would otherwise
+  /// sit in the list for ever, since nothing else ever removes a row. Only
+  /// called with a complete first page, never with a paged fragment — pruning
+  /// against a partial list would delete everything below the fold.
+  Future<int> pruneChatsNotIn(List<String> keep) {
+    if (keep.isEmpty) {
+      return delete(chats).go();
+    }
+    return (delete(chats)..where(($ChatsTable t) => t.id.isNotIn(keep))).go();
   }
 
   /// Inserts or replaces a message. Server state always wins over the local
