@@ -148,7 +148,7 @@ tests.
 
 | Area | What exists |
 |---|---|
-| **Database** | 91 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
+| **Database** | 91 domain tables covering every area of the specification, plus the migration ledger. 15 migrations with working `down` steps, verified by applying and reverting all of them against a live PostgreSQL — 92 tables to 1 and back. |
 | **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
 | **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
@@ -301,13 +301,12 @@ a single process: it bounds latency, not capacity.
 |---|---|
 | `docs/protocol/websocket.md` | Frame format, events, sync, reconnection, scaling |
 | `protocol/rest/openapi.yaml` | REST contract: all 180 operations across 147 paths, kept in step with the router by a test |
+| `docs/deployment/README.md` | Running it: configuration, secrets and rotation, Kubernetes, migrations, backup, disaster recovery, and what each alert means |
 | `docs/architecture/roadmap.md` | Per-stage delivery status, and the trade-offs taken deliberately |
 | `docs/security/third-party-licences.md` | Every direct dependency and its licence (§84.19), including the one that constrains distribution |
 
-Not yet written: a threat model, a deployment and disaster-recovery guide, and
-prose descriptions of the database and sync models. The systems themselves are
-built and covered by tests — `scripts/backup.sh` and `scripts/restore.sh` are
-the working procedures, `infrastructure/kubernetes/` the manifests, and
+Not yet written: a threat model, and prose descriptions of the database and
+sync models. Those systems are built and covered by tests —
 `docs/protocol/websocket.md` describes the sync protocol — but the explanatory
 documents do not exist, and an earlier version of this table listed them as
 though they did.
