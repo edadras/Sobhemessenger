@@ -30,12 +30,12 @@ A feature is complete only when all of the following hold:
 | 04 | Users — profiles, privacy, contacts | done: discovery by HMAC digest, blocking, privacy resolved per viewer in SQL |
 | 05 | WebSocket — hub, heartbeat, acks, sync, cross-node routing | done |
 | 06 | Messaging — send, edit, delete, react, read, drafts | done |
-| 07 | Media — upload sessions, validation, variants | done: server and worker; the mobile UI sends text only |
+| 07 | Media — upload sessions, validation, variants | done, including the mobile composer and renderers |
 | 08 | Groups — roles, permissions, invites, join requests | done |
 | 09 | Channels — posts, statistics, discussion links | done |
 | 10 | Communities | done |
-| 11 | Stories | done: feed, viewer, views and reactions; no capture screen |
-| 12 | Calls — WebRTC signalling, TURN | partial: signalling, ICE servers and history; no peer connection in the app |
+| 11 | Stories | done: composer, tray, viewer, views and reactions |
+| 12 | Calls — WebRTC signalling, TURN | done: signalling, TURN, history, and a real peer connection in the app |
 | 13 | News platform — CMS, feed, breaking news | done |
 | 14 | Search — OpenSearch, Persian normalisation | done |
 | 15 | Notifications — FCM, APNs | done |
@@ -43,9 +43,9 @@ A feature is complete only when all of the following hold:
 | 17 | Security hardening review | ongoing |
 | 18 | Monitoring and alerting | done |
 | 19 | Backup and disaster recovery | done |
-| 20 | Flutter — feature screens | done for messaging, contacts, groups, channels, stories, news, search, settings |
+| 20 | Flutter — feature screens | done: every domain with a backend has a client |
 | 21 | Integration | done: the real router driven over HTTP and WebSocket against real dependencies |
-| 22 | Load testing (§78) | partial: §79 latency budgets asserted in-process; the 500k ramp has not been run against a cluster |
+| 22 | Load testing (§78) | partial: harness run against the assembled stack and passing; the 500k ramp needs a cluster |
 | 23 | Production | not started |
 
 ## Secret chats (§24)
@@ -60,18 +60,17 @@ use a reviewed implementation rather than a hand-rolled one.
 
 ## What is left
 
-**Media in the mobile UI.** The upload session, validation, variant and
-playback APIs are complete and tested. The Flutter composer sends text only,
-so images, video and voice cannot be attached from the app yet.
-
-**The call screen.** Signalling relays SDP and ICE, TURN credentials are
-issued, and history renders. The `flutter_webrtc` peer connection and the
-in-call UI are not built.
-
-**Story composition.** The tray, viewer and view recording work against the
-real API; there is no capture or editing screen.
-
 **Load testing at scale.** `scripts/loadtest/messaging.js` implements the §78
 ramp to 500k concurrent with thresholds that fail on a missed §79 target. It
-has not been run against a deployed cluster. The in-process end-to-end
-measurements bound latency, not capacity.
+has been run against the assembled stack — API, PostgreSQL, Redis, NATS and
+MinIO on one machine — and passes with a wide margin, and a deliberately
+impossible threshold was used to confirm a breach really does fail the run.
+Reaching the 500k stage needs a deployed cluster and load generators, which is
+a capacity question rather than a code one.
+
+**Secret chats on the device.** The server half is complete: a key directory
+that hands out each one-time prekey once, and a mailbox that deletes ciphertext
+on acknowledgement. X3DH and the Double Ratchet belong on the device, and §84
+rules 16 and 17 require a reviewed implementation rather than a hand-rolled
+one, so this waits on adopting a vetted library rather than on writing more
+protocol code.

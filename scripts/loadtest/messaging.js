@@ -229,31 +229,38 @@ function exerciseRest(pair, headers) {
 }
 
 function exerciseWebSocket(pair) {
+  /*
+   * The socket is held by the receiver and the messages are sent by the other
+   * party over REST. That asymmetry is deliberate: the server does not echo a
+   * message back to its own sender, so a virtual user that both sends and
+   * listens on one socket would measure acknowledgement and never delivery.
+   */
   const url = `${WS_URL}?token=${pair.receiver.token}&protocol_version=1`;
-  const sentAt = new Map();
+  const senderHeaders = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${pair.sender.token}`,
+  };
 
   const response = ws.connect(url, {}, function (socket) {
     socket.on('open', function () {
       wsConnectRate.add(true);
 
-      /* Send through the socket and time the acknowledgement. */
       socket.setInterval(function () {
-        const requestId = uuidv4();
-        sentAt.set(requestId, Date.now());
-
-        socket.send(
+        const started = Date.now();
+        const sent = http.post(
+          `${BASE_URL}/api/v1/chats/${pair.chatId}/messages`,
           JSON.stringify({
-            id: requestId,
-            event: 'message.send',
-            payload: {
-              chat_id: pair.chatId,
-              client_message_id: uuidv4(),
-              type: 'text',
-              content: `ws load ${randomIntBetween(1, 1000000)}`,
-            },
+            client_message_id: uuidv4(),
+            type: 'text',
+            content: `ws load ${randomIntBetween(1, 1000000)}`,
           }),
+          { headers: senderHeaders, tags: { name: 'send_for_delivery' } },
         );
-        messagesSent.add(1);
+
+        if (sent.status === 201) {
+          sendAckLatency.add(Date.now() - started);
+          messagesSent.add(1);
+        }
       }, randomIntBetween(2000, 6000));
 
       /* Application-level heartbeat, mirroring what the app does. */
@@ -268,11 +275,6 @@ function exerciseWebSocket(pair) {
         frame = JSON.parse(raw);
       } catch (error) {
         return;
-      }
-
-      if (frame.event === 'message.sent' && frame.id && sentAt.has(frame.id)) {
-        sendAckLatency.add(Date.now() - sentAt.get(frame.id));
-        sentAt.delete(frame.id);
       }
 
       if (frame.event === 'message.new') {

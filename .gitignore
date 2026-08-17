@@ -34,3 +34,6 @@ pgdata/
 *.g.dart
 *.freezed.dart
 apps/*/lib/core/localization/generated/
+
+# The k6 run writes its summary next to the working directory.
+loadtest-summary.json

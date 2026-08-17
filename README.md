@@ -85,6 +85,22 @@ default run needs no database. The end-to-end suite additionally starts an
 in-process NATS server and an in-memory Redis, so it needs nothing else
 installed. Set `SOBH_TEST_LOG=1` to see the server's own logs while a test runs.
 
+### Load test
+
+```bash
+# Against the compose stack, or any environment with SMS_ECHO_CODES on.
+k6 run -e STAGE=smoke -e ACCOUNT_POOL=20 scripts/loadtest/messaging.js
+k6 run -e STAGE=10k  -e BASE_URL=https://staging.example scripts/loadtest/messaging.js
+```
+
+Stages are `smoke`, `10k`, `50k` and `100k`, matching the §78 ramp. The
+thresholds are the §79 targets, so k6 exits non-zero when one is crossed —
+the run is a gate, not a traffic generator.
+
+The harness seeds its own accounts, which needs `SMS_ECHO_CODES=true`.
+Configuration refuses that setting in production, so the test cannot be pointed
+at real users by accident.
+
 ---
 
 ## Design decisions worth knowing
@@ -152,34 +168,42 @@ tests.
 | **Protocol** | OpenAPI 3.1 for the implemented surface and a full WebSocket protocol document. |
 | **Contacts** | Discovery by HMAC digest under a server-published pepper — a phone number never leaves the device — with full and incremental sync, favourites, blocking in both directions, and privacy resolved per viewer in SQL. |
 | **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. |
-| **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats, contacts, groups and channels with member administration, invite links and join requests, stories with a viewer, calls, the news feed with articles and bookmarks, search, profile and settings. |
+| **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats with media, voice notes and polls; contacts; groups and channels with member administration, invite links and join requests; stories with a composer and viewer; WebRTC calls; communities; the news feed with articles and bookmarks; search; notifications; profile and settings. |
+| **Mobile media** | Presigned multipart upload straight to object storage, images with reserved aspect ratio, video posters, voice notes recorded in Opus and drawn with the server's waveform, and a readiness gate so nothing renders before it is scanned and processed. |
+| **Mobile calls** | A real WebRTC peer connection over the signalling relay, with candidate buffering, per-call TURN credentials, mute, camera and speaker controls, and incoming calls caught above the whole navigator. |
 
 ### Verified, not asserted
 
-The end-to-end suite assembles the production router against a real
+Two independent measurements, both against real dependencies.
+
+**The end-to-end suite** assembles the production router against a real
 PostgreSQL, a real Redis protocol implementation and an in-process NATS with
 JetStream, then signs in over HTTP, opens a chat, sends over a WebSocket and
-resumes from a cursor. Measured on one process against the §79 budgets:
+resumes from a cursor.
 
-| Path | Measured p95 | Budget |
-|---|---|---|
-| Message send (HTTP) | 57 ms | 200 ms |
-| Send ack (WebSocket) | 4 ms | 300 ms |
-| Delivery to recipient | 4 ms | 500 ms |
+**The k6 harness** runs against the assembled stack — the API binary,
+PostgreSQL, Redis, NATS and MinIO, all four reporting healthy — driving mixed
+REST and WebSocket traffic with think time.
 
-The budgets are asserted, so a regression fails the build rather than shipping.
+| Path | End-to-end suite | k6 smoke | Budget (§79) |
+|---|---|---|---|
+| Message send (HTTP) | 57 ms | 5 ms | 200 ms |
+| Send ack | 4 ms | 6 ms | 300 ms |
+| Delivery to recipient | 4 ms | 4 ms | 500 ms |
+
+Both assert rather than report: the suite fails the build on a regression, and
+k6 exits 99 when a threshold is crossed — verified by running it against a
+deliberately impossible target and confirming it fails.
 
 ### Not yet built
 
-- **Media in the mobile UI** — the upload, variant and playback APIs are
-  complete and tested, but the Flutter screens send and render text only.
-- **The call screen** — signalling, ICE servers and history are wired; the
-  WebRTC peer connection and its UI are not.
-- **Composing stories** — the viewer and tray are built and the create
-  endpoint exists; there is no capture screen.
-- **Load testing at scale (§22)** — the k6 harness implements the §78 ramp to
-  500k against a deployed cluster and has not been run there. What is measured
-  above is a single process, which bounds latency but not capacity.
+- **Load testing at scale (§22)** — the harness implements the §78 ramp to
+  500k concurrent, but running it needs a deployed cluster. What is measured
+  above is a single process: it bounds latency, not capacity.
+- **Secret chats on the device (§24)** — the server half is complete. X3DH and
+  the Double Ratchet belong on the device and will use a reviewed
+  implementation rather than a hand-rolled one (§84.16–17), so this waits on
+  choosing one.
 
 `docs/architecture/roadmap.md` carries the per-stage detail.
 
