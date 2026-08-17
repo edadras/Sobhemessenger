@@ -342,6 +342,9 @@ func (h *Handler) APIRoutes() http.Handler {
 	r.Get("/me", h.apiMe)
 	r.Get("/updates", h.apiGetUpdates)
 	r.Post("/messages", h.apiSendMessage)
+	r.Put("/messages/{messageID}/reply-markup", h.apiSetReplyMarkup)
+	r.Post("/callbacks/{queryID}/answer", h.apiAnswerCallback)
+	r.Post("/inline/{queryID}/answer", h.apiAnswerInlineQuery)
 	r.Put("/commands", h.apiSetCommands)
 	r.Put("/webhook", h.apiSetWebhook)
 	r.Delete("/webhook", h.apiDeleteWebhook)
@@ -419,17 +422,18 @@ func (h *Handler) apiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		ChatID    uuid.UUID  `json:"chat_id"`
-		Content   string     `json:"content"`
-		ReplyToID *uuid.UUID `json:"reply_to_id"`
+		ChatID      uuid.UUID  `json:"chat_id"`
+		Content     string     `json:"content"`
+		ReplyToID   *uuid.UUID `json:"reply_to_id"`
+		ReplyMarkup *Keyboard  `json:"reply_markup"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 
-	message, err := h.service.SendMessage(r.Context(), principal.UserID,
-		body.ChatID, body.Content, body.ReplyToID)
+	message, err := h.service.SendMessageWithKeyboard(r.Context(), principal.UserID,
+		body.ChatID, body.Content, body.ReplyToID, body.ReplyMarkup)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -497,4 +501,206 @@ func (h *Handler) apiDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.NoContent(w, r)
+}
+
+// ---------------------------------------------------- keyboards and inline
+
+func (h *Handler) apiSetReplyMarkup(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, parseErr := uuid.Parse(chi.URLParam(r, "messageID"))
+	if parseErr != nil {
+		httpx.Fail(w, r, httpx.BadRequest("messageID is not a valid UUID"))
+		return
+	}
+
+	// A null keyboard removes the buttons, which is how a bot retires a menu
+	// once its choice has been made.
+	var body struct {
+		ReplyMarkup *Keyboard `json:"reply_markup"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.SetReplyMarkup(r.Context(), principal.UserID,
+		messageID, body.ReplyMarkup); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) apiAnswerCallback(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	queryID, parseErr := uuid.Parse(chi.URLParam(r, "queryID"))
+	if parseErr != nil {
+		httpx.Fail(w, r, httpx.BadRequest("queryID is not a valid UUID"))
+		return
+	}
+
+	var body struct {
+		Text      string `json:"text"`
+		ShowAlert bool   `json:"show_alert"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.AnswerCallback(r.Context(), principal.UserID,
+		queryID, body.Text, body.ShowAlert); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) apiAnswerInlineQuery(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	queryID, parseErr := uuid.Parse(chi.URLParam(r, "queryID"))
+	if parseErr != nil {
+		httpx.Fail(w, r, httpx.BadRequest("queryID is not a valid UUID"))
+		return
+	}
+
+	var body struct {
+		Results []InlineResult `json:"results"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.AnswerInlineQuery(r.Context(), principal.UserID,
+		queryID, body.Results); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+// ------------------------------------------------------- what people call
+
+// InlineRoutes are the calls a person's client makes: opening an inline query
+// as they type, reading the results, and sending the one they pick.
+func (h *Handler) InlineRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Post("/queries", h.openInlineQuery)
+	r.Get("/queries/{queryID}/results", h.readInlineResults)
+	r.Post("/queries/{queryID}/choose", h.chooseInlineResult)
+	r.Post("/callbacks", h.tapButton)
+	return r
+}
+
+func (h *Handler) openInlineQuery(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Bot    string `json:"bot"`
+		Query  string `json:"query"`
+		Offset string `json:"offset"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	query, err := h.service.StartInlineQuery(r.Context(), principal.UserID,
+		body.Bot, body.Query, body.Offset)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, query)
+}
+
+func (h *Handler) readInlineResults(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	queryID, parseErr := uuid.Parse(chi.URLParam(r, "queryID"))
+	if parseErr != nil {
+		httpx.Fail(w, r, httpx.BadRequest("queryID is not a valid UUID"))
+		return
+	}
+
+	results, err := h.service.InlineResults(r.Context(), principal.UserID, queryID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"results": results})
+}
+
+func (h *Handler) chooseInlineResult(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	queryID, parseErr := uuid.Parse(chi.URLParam(r, "queryID"))
+	if parseErr != nil {
+		httpx.Fail(w, r, httpx.BadRequest("queryID is not a valid UUID"))
+		return
+	}
+
+	var body struct {
+		ChatID   uuid.UUID `json:"chat_id"`
+		ResultID string    `json:"result_id"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	message, err := h.service.ChooseInlineResult(r.Context(), principal.UserID,
+		queryID, body.ChatID, body.ResultID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, message)
+}
+
+func (h *Handler) tapButton(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		MessageID uuid.UUID `json:"message_id"`
+		Data      string    `json:"data"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	query, err := h.service.Tap(r.Context(), principal.UserID, body.MessageID, body.Data)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, query)
 }

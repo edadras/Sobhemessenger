@@ -76,8 +76,14 @@ type SendInput struct {
 	Mentions        []uuid.UUID
 	// Forward is set when this send is a forward, and names the original
 	// author rather than the person passing it on.
-	Forward  *ForwardInfo
-	IsSilent bool
+	Forward *ForwardInfo
+	// ReplyMarkup is an inline keyboard. The REST handler never reads it from a
+	// request body, so a person cannot set one: only the bot service does, and
+	// only for a bot's own message. A keyboard from an arbitrary user would be
+	// a way to make everyone else's client render a callback target of their
+	// choosing.
+	ReplyMarkup json.RawMessage
+	IsSilent    bool
 }
 
 // Send validates, authorises, persists and broadcasts a message.
@@ -138,6 +144,7 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		Attachments:     in.Attachments,
 		MentionUserIDs:  in.Mentions,
 		Forward:         in.Forward,
+		ReplyMarkup:     in.ReplyMarkup,
 		IsSilent:        in.IsSilent,
 	})
 	if err != nil {
@@ -219,11 +226,23 @@ func (s *Service) validateSend(in *SendInput) error {
 	if needsBody && in.Content == "" && len(in.Attachments) == 0 {
 		return httpx.Validation("Message is empty").WithField("content", "must not be empty")
 	}
+	// A location and a contact are structured, and a client draws a map pin or
+	// a save-number button from them. Arbitrary JSON in that column is a crash
+	// in somebody else's renderer, so it is checked here rather than hoped for.
+	normalized, err := validateTypedPayload(in.Type, in.Payload)
+	if err != nil {
+		return err
+	}
+	in.Payload = normalized
 	if in.Entities != nil && !json.Valid(in.Entities) {
 		return httpx.Validation("entities is not valid JSON").WithField("entities", "invalid JSON")
 	}
 	if in.Payload != nil && !json.Valid(in.Payload) {
 		return httpx.Validation("payload is not valid JSON").WithField("payload", "invalid JSON")
+	}
+	if in.ReplyMarkup != nil && !json.Valid(in.ReplyMarkup) {
+		return httpx.Validation("reply_markup is not valid JSON").
+			WithField("reply_markup", "invalid JSON")
 	}
 	return nil
 }

@@ -354,6 +354,9 @@ func (a *App) buildRouter(
 			private.Mount("/users", usersHandler.Routes())
 			private.Mount("/bots", botsHandler.ManagementRoutes())
 			private.Mount("/stickers", stickersHandler.Routes())
+			// What a person's client calls to use a bot inline or tap a button,
+			// as distinct from /bots (managing your own) and /bot (being one).
+			private.Mount("/inline", botsHandler.InlineRoutes())
 			private.Mount("/contacts", contactsHandler.Routes())
 			// The server's half of end-to-end encryption: a key directory and a
 			// mailbox for ciphertext it cannot read (§24).

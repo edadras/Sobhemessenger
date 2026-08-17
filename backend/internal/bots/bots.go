@@ -111,12 +111,13 @@ type Webhook struct {
 // already has code that switches on them. A command is not among them because
 // a command is a message that starts with a slash, there as well as here.
 const (
-	UpdateMessage       = "message"
-	UpdateEditedMessage = "edited_message"
-	UpdateCallbackQuery = "callback_query"
-	UpdateInlineQuery   = "inline_query"
-	UpdateChatMember    = "chat_member"
-	UpdateMyChatMember  = "my_chat_member"
+	UpdateMessage            = "message"
+	UpdateEditedMessage      = "edited_message"
+	UpdateCallbackQuery      = "callback_query"
+	UpdateInlineQuery        = "inline_query"
+	UpdateChosenInlineResult = "chosen_inline_result"
+	UpdateChatMember         = "chat_member"
+	UpdateMyChatMember       = "my_chat_member"
 )
 
 // Update is one thing that happened, addressed to a bot.

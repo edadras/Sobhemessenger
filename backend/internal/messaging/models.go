@@ -202,11 +202,15 @@ type Message struct {
 	ForwardFrom     *ForwardInfo    `json:"forward_from,omitempty"`
 	Attachments     []Attachment    `json:"attachments,omitempty"`
 	Reactions       []ReactionGroup `json:"reactions,omitempty"`
-	IsPinned        bool            `json:"is_pinned"`
-	ViewCount       int             `json:"view_count,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	EditedAt        *time.Time      `json:"edited_at,omitempty"`
-	DeletedAt       *time.Time      `json:"deleted_at,omitempty"`
+	// ReplyMarkup is the inline keyboard under the message, when a bot put one
+	// there. It is its own field rather than part of Payload because Payload is
+	// shaped by the message type and a keyboard is orthogonal to all of them.
+	ReplyMarkup json.RawMessage `json:"reply_markup,omitempty"`
+	IsPinned    bool            `json:"is_pinned"`
+	ViewCount   int             `json:"view_count,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	EditedAt    *time.Time      `json:"edited_at,omitempty"`
+	DeletedAt   *time.Time      `json:"deleted_at,omitempty"`
 }
 
 type ForwardInfo struct {

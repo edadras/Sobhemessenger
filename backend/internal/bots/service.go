@@ -2,6 +2,7 @@ package bots
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"regexp"
@@ -313,6 +314,33 @@ func (s *Service) GetUpdates(ctx context.Context, botID uuid.UUID, offset int64,
 // same membership, permission, slow-mode and rate-limit rules as anyone else.
 // A bot that is not in a chat cannot post to it.
 func (s *Service) SendMessage(ctx context.Context, botID, chatID uuid.UUID, content string, replyTo *uuid.UUID) (*messaging.Message, error) {
+	return s.SendMessageWithKeyboard(ctx, botID, chatID, content, replyTo, nil)
+}
+
+// SendMessageWithKeyboard sends as the bot, optionally with buttons under it.
+//
+// This is the only path that sets reply_markup. The REST handler for people
+// does not read the field from a request body, so a keyboard cannot be
+// attached by anyone but the bot that owns the message.
+func (s *Service) SendMessageWithKeyboard(
+	ctx context.Context,
+	botID, chatID uuid.UUID,
+	content string,
+	replyTo *uuid.UUID,
+	keyboard *Keyboard,
+) (*messaging.Message, error) {
+	var markup json.RawMessage
+	if keyboard != nil {
+		if err := keyboard.Validate(); err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(keyboard)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		markup = encoded
+	}
+
 	return s.messaging.Send(ctx, messaging.SendInput{
 		ChatID:          chatID,
 		SenderID:        botID,
@@ -320,6 +348,7 @@ func (s *Service) SendMessage(ctx context.Context, botID, chatID uuid.UUID, cont
 		Type:            messaging.TypeText,
 		Content:         content,
 		ReplyToID:       replyTo,
+		ReplyMarkup:     markup,
 	})
 }
 
@@ -356,3 +385,6 @@ func validateWebhookURL(raw string) error {
 	}
 	return nil
 }
+
+// errAttr keeps the observer, keyboard and inline paths' logging to one shape.
+func errAttr(err error) slog.Attr { return slog.Any("error", err) }

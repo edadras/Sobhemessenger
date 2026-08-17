@@ -756,6 +756,60 @@ func (h *Handler) RegisterOrganiseRoutes(r chi.Router) {
 // is already the path parameter.
 func (h *Handler) RegisterPinRoute(r chi.Router) {
 	r.Put("/{messageID}/pin", h.setPinned)
+	r.Put("/{messageID}/live-location", h.updateLiveLocation)
+	r.Delete("/{messageID}/live-location", h.stopLiveLocation)
+}
+
+func (h *Handler) updateLiveLocation(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, err := pathUUID(r, "messageID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Latitude           float64 `json:"latitude"`
+		Longitude          float64 `json:"longitude"`
+		HorizontalAccuracy float64 `json:"horizontal_accuracy"`
+		Heading            float64 `json:"heading"`
+		Speed              float64 `json:"speed"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	message, err := h.service.UpdateLiveLocation(r.Context(), messageID, principal.UserID,
+		body.Latitude, body.Longitude, body.HorizontalAccuracy, body.Heading, body.Speed)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, message)
+}
+
+func (h *Handler) stopLiveLocation(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, err := pathUUID(r, "messageID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.StopLiveLocation(r.Context(), messageID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
 }
 
 func (h *Handler) forward(w http.ResponseWriter, r *http.Request) {

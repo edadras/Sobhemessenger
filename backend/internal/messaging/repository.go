@@ -246,7 +246,9 @@ type SendParams struct {
 	Attachments     []Attachment
 	MentionUserIDs  []uuid.UUID
 	Forward         *ForwardInfo
-	IsSilent        bool
+	// ReplyMarkup is a bot's inline keyboard; nil for everything else.
+	ReplyMarkup json.RawMessage
+	IsSilent    bool
 }
 
 // SendResult carries the stored message plus who must be notified.
@@ -296,18 +298,20 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			INSERT INTO messages (
 				chat_id, seq, sender_id, client_message_id, type, content, entities, payload,
 				reply_to_id, forward_from_chat_id, forward_from_message_id, forward_from_user_id,
-				forward_signature, is_silent
+				forward_signature, is_silent, reply_markup
 			) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '[]'::jsonb), COALESCE($8, '{}'::jsonb),
-			          $9, $10, $11, $12, $13, $14)
+			          $9, $10, $11, $12, $13, $14, $15)
 			RETURNING id, chat_id, seq, sender_id, client_message_id, type, content,
-			          entities, payload, reply_to_id, is_pinned, created_at, edited_at, deleted_at`,
+			          entities, payload, reply_to_id, is_pinned, created_at, edited_at, deleted_at,
+			          reply_markup`,
 			p.ChatID, seq, p.SenderID, p.ClientMessageID, p.Type, p.Content,
 			nullableJSON(p.Entities), nullableJSON(p.Payload), p.ReplyToID,
 			forwardChat(p.Forward), forwardMessage(p.Forward), forwardUser(p.Forward),
-			forwardSignature(p.Forward), p.IsSilent,
+			forwardSignature(p.Forward), p.IsSilent, nullableJSON(p.ReplyMarkup),
 		).Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID, &message.ClientMessageID,
 			&message.Type, &message.Content, &message.Entities, &message.Payload, &message.ReplyToID,
-			&message.IsPinned, &message.CreatedAt, &message.EditedAt, &message.DeletedAt)
+			&message.IsPinned, &message.CreatedAt, &message.EditedAt, &message.DeletedAt,
+			&message.ReplyMarkup)
 		if err != nil {
 			return fmt.Errorf("messaging: insert message: %w", err)
 		}
@@ -475,7 +479,7 @@ func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, be
 		       m.entities, m.payload, m.reply_to_id,
 		       m.forward_from_chat_id, m.forward_from_message_id, m.forward_from_user_id,
 		       m.forward_signature, m.is_pinned, m.view_count,
-		       m.created_at, m.edited_at, m.deleted_at,
+		       m.created_at, m.edited_at, m.deleted_at, m.reply_markup,
 		       COALESCE((
 		           SELECT jsonb_agg(jsonb_build_object(
 		               'media_id', a.media_id, 'position', a.position, 'caption', a.caption)
@@ -522,7 +526,7 @@ func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, be
 			&message.Payload, &message.ReplyToID, &forwardChatID, &forwardMsgID, &forwardUserID,
 			&forwardSig, &message.IsPinned, &message.ViewCount,
 			&message.CreatedAt, &message.EditedAt, &message.DeletedAt,
-			&rawAttach, &rawReactions); err != nil {
+			&message.ReplyMarkup, &rawAttach, &rawReactions); err != nil {
 			return nil, err
 		}
 

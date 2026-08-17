@@ -39,6 +39,10 @@ tags:
       Authorization header rather than in the path — a token in the URL lands
       in every access log and proxy trace between the bot and the server.
   - name: Stickers
+  - name: Inline mode
+    description: |
+      Invoking a bot from another chat's compose box, and tapping the buttons
+      under a bot's message.
   - name: Groups and channels
   - name: Communities
   - name: Stories
@@ -4215,6 +4219,366 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/v1/messages/{messageID}/live-location:
+    put:
+      tags: [Messages]
+      summary: Move a location you are sharing live
+      description: |
+        Updates the point on a message rather than posting a new one: a
+        position that reports every few seconds would otherwise bury the
+        conversation under a movement log, and the useful question is where
+        someone is now.
+
+        Only the author can move it, and only while the sharing period is
+        still running. The expiry is not extended by an update — a position
+        that keeps moving would otherwise never stop being shared. `edited_at`
+        is deliberately left alone, because a moving pin is not an edit.
+
+        Delivered on the chat subject rather than as a per-recipient sync
+        event, so a share does not write one event per member per reading.
+      parameters:
+        - in: path
+          name: messageID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude: { type: number, minimum: -90, maximum: 90 }
+                longitude: { type: number, minimum: -180, maximum: 180 }
+                horizontal_accuracy: { type: number, minimum: 0, maximum: 100000 }
+                heading: { type: number, minimum: 0, maximum: 360 }
+                speed: { type: number, minimum: 0, maximum: 1000 }
+      responses:
+        "200":
+          description: The message with its new point
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: Not a live location of yours
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "409":
+          description: The sharing period has ended
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Messages]
+      summary: Stop sharing a live location
+      description: |
+        Stopping is final: the share cannot be restarted by a later update, or
+        the button would not mean what it says. The message stays as the record
+        that a location was shared, with its last point still readable.
+      parameters:
+        - in: path
+          name: messageID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Sharing stopped
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: It was not being shared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/bot/messages/{messageID}/reply-markup:
+    put:
+      tags: [Bot API]
+      summary: Replace or remove the keyboard under one of the bot's messages
+      description: |
+        Editing the buttons rather than the text is how a bot shows a choice
+        being made — a menu becoming a confirmation — without filling the chat
+        with messages nobody wants to scroll past. A null keyboard removes
+        them, which retires a menu once its choice has been taken.
+
+        A bot may only edit its own message, which is also what stops one bot
+        rewriting another's buttons.
+      security:
+        - botToken: []
+      parameters:
+        - in: path
+          name: messageID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reply_markup:
+                  nullable: true
+                  allOf: [{ $ref: "#/components/schemas/InlineKeyboard" }]
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/bot/callbacks/{queryID}/answer:
+    post:
+      tags: [Bot API]
+      summary: Answer a button tap
+      description: |
+        A tap that is never answered leaves the client waiting, so answering is
+        part of handling one even when there is nothing to say. A query can be
+        answered once, and only by the bot whose button it was.
+      security:
+        - botToken: []
+      parameters:
+        - in: path
+          name: queryID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 200 }
+                show_alert:
+                  type: boolean
+                  default: false
+                  description: A dialog rather than a toast, for something worth stopping at.
+      responses:
+        "200":
+          description: Answered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Already answered, or not this bot's query
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/bot/inline/{queryID}/answer:
+    post:
+      tags: [Bot API]
+      summary: Answer an inline query with results
+      description: |
+        Results are offered, not sent. Nothing reaches a chat until the person
+        picks one, and what is then sent is sent by them.
+
+        Result ids must be distinct: two results sharing an id would make a
+        chosen result ambiguous, and the bot would be told the wrong thing was
+        picked.
+      security:
+        - botToken: []
+      parameters:
+        - in: path
+          name: queryID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                results:
+                  type: array
+                  maxItems: 50
+                  items: { $ref: "#/components/schemas/InlineResult" }
+      responses:
+        "200":
+          description: Stored, ready for the picker
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: The query is not open, has expired, or is not this bot's
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/inline/queries:
+    post:
+      tags: [Inline mode]
+      summary: Ask a bot for results as you type
+      description: |
+        What a client calls as someone types `@somebot pizza` in any chat. The
+        bot need not be a member of that chat and is never told which chat it
+        is: it has no claim to know, and saying so would leak the existence of
+        a conversation it is not part of.
+
+        The bot must have inline mode on, so one that never advertised it
+        cannot be made to answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bot]
+              properties:
+                bot:
+                  type: string
+                  description: The bot's username, with or without the leading @.
+                query: { type: string, maxLength: 256 }
+                offset:
+                  type: string
+                  description: Opaque paging cursor, as the bot defined it in its last answer.
+      responses:
+        "201":
+          description: The open query, to poll for results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/InlineQuery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: That bot does not answer inline queries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/inline/queries/{queryID}/results:
+    get:
+      tags: [Inline mode]
+      summary: Read what the bot offered
+      description: |
+        Only the person who asked can read them: an inline query is a private
+        exchange, and naming the query id must not be enough to see it. Empty
+        until the bot has answered, and gone once the query expires.
+      parameters:
+        - in: path
+          name: queryID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The results, or an empty list while the bot is still thinking
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          results:
+                            type: array
+                            items: { $ref: "#/components/schemas/InlineResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/inline/queries/{queryID}/choose:
+    post:
+      tags: [Inline mode]
+      summary: Send the result you picked
+      description: |
+        The message is sent **by you**, not by the bot: you chose it and it
+        appears in your voice, which is also why the bot needs no membership of
+        the chat it lands in. It goes through the ordinary send path, so your
+        own membership and permissions decide whether it lands — picking a
+        bot's result is not a way to post somewhere you cannot post.
+
+        The bot is told afterwards which result was taken, and still not where
+        it went.
+      parameters:
+        - in: path
+          name: queryID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id, result_id]
+              properties:
+                chat_id: { type: string, format: uuid }
+                result_id: { type: string }
+      responses:
+        "201":
+          description: The message as sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/inline/callbacks:
+    post:
+      tags: [Inline mode]
+      summary: Tap a button under a bot's message
+      description: |
+        The data must name a button that is really on that message, and the
+        caller must be in the chat. Without both checks anyone could post any
+        callback data to any bot, and a bot that switches on `data` would act
+        on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id, data]
+              properties:
+                message_id: { type: string, format: uuid }
+                data:
+                  type: string
+                  description: The `callback_data` of the button being tapped.
+      responses:
+        "201":
+          description: The query, which the bot will answer
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/CallbackQuery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: No such button on that message, or you are not in the chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4864,3 +5228,163 @@ components:
         author_id: { type: string, format: uuid, nullable: true }
         is_breaking: { type: boolean, default: false }
         tag_ids: { type: array, items: { type: string, format: uuid } }
+
+    InlineKeyboard:
+      type: object
+      description: |
+        Buttons under a message. Only a bot can attach one: a keyboard from an
+        arbitrary user would be a way to make everyone else's client render a
+        callback target of their choosing, so the REST handler for people never
+        reads the field from a request body.
+      properties:
+        inline_keyboard:
+          type: array
+          maxItems: 20
+          items:
+            type: array
+            maxItems: 8
+            items: { $ref: "#/components/schemas/InlineKeyboardButton" }
+
+    InlineKeyboardButton:
+      type: object
+      description: |
+        Exactly one action must be set. A button that does nothing looks
+        tappable and is not, which is worse than no button.
+      required: [text]
+      properties:
+        text: { type: string, maxLength: 64 }
+        callback_data:
+          type: string
+          maxLength: 64
+          description: |
+            Sent back to the bot when tapped. It never leaves the platform, so
+            it can hold whatever the bot needs to identify the tap — but it
+            travels with every render, hence the limit.
+        url:
+          type: string
+          format: uri
+          description: |
+            Opens a link instead of calling the bot. Checked against the same
+            SSRF guard as a webhook, because it is tapped by everyone who sees
+            the message.
+        switch_inline_query:
+          type: string
+          nullable: true
+          description: Puts `@bot <query>` into the compose box of a chat the user picks.
+
+    CallbackQuery:
+      type: object
+      description: A button press, waiting for its bot to answer.
+      properties:
+        id: { type: string, format: uuid }
+        bot_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid, nullable: true }
+        message_id: { type: string, format: uuid, nullable: true }
+        data: { type: string }
+        created_at: { type: string, format: date-time }
+
+    InlineQuery:
+      type: object
+      description: |
+        One ask, waiting for its bot. Deliberately carries no chat id: the bot
+        has no claim to know where its caller is typing.
+      properties:
+        id: { type: string, format: uuid }
+        bot_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        query: { type: string }
+        offset: { type: string }
+        created_at: { type: string, format: date-time }
+
+    InlineResult:
+      type: object
+      description: One thing a bot offers in answer to an inline query.
+      required: [id, type, title]
+      properties:
+        id:
+          type: string
+          description: |
+            The bot's own identifier, echoed back when the result is chosen.
+            Must be distinct within one answer, or a chosen result would be
+            ambiguous.
+        type:
+          type: string
+          enum: [article, photo, video, audio, document, sticker, gif]
+          description: Each maps onto a message type, because choosing a result sends a message.
+        title: { type: string }
+        description: { type: string }
+        content:
+          type: string
+          description: What gets sent when chosen. Required for an article.
+        media_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required for every type but article.
+        thumbnail_media_id: { type: string, format: uuid, nullable: true }
+        reply_markup:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/InlineKeyboard" }]
+
+    LocationPayload:
+      type: object
+      description: |
+        The `payload` of a message whose `type` is `location`. Validated on the
+        way in — a latitude of 200 is not a far-away place, it is a bug or an
+        attempt to break whatever draws the pin.
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        horizontal_accuracy:
+          type: number
+          minimum: 0
+          maximum: 100000
+          description: |
+            Radius in metres the device reported, so a client can draw the
+            uncertainty rather than implying a precision the reading lacks.
+        live_period_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          description: |
+            Set for a position that keeps updating; absent for a fixed point.
+            A day is the ceiling, because the cost of getting this wrong is
+            being tracked.
+        live_until:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+          description: |
+            Computed by the server from the period. A value sent by a client is
+            ignored, so a device with a wrong clock cannot extend a share.
+        heading: { type: number, minimum: 0, maximum: 360 }
+        speed: { type: number, minimum: 0, maximum: 1000 }
+        place_name:
+          type: string
+          maxLength: 128
+          description: Set for a venue — "share this restaurant" rather than "share where I am".
+        place_address: { type: string }
+
+    ContactPayload:
+      type: object
+      description: The `payload` of a message whose `type` is `contact`.
+      required: [phone_number, first_name]
+      properties:
+        phone_number: { type: string, maxLength: 32 }
+        first_name: { type: string, maxLength: 128 }
+        last_name: { type: string, maxLength: 128 }
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Set when the sender's client recognised the number as an account
+            here, so the renderer can offer "open chat" rather than "save
+            number". A hint for drawing, trusted for nothing else.
+        vcard:
+          type: string
+          maxLength: 8192
+          description: The raw card, so a client can hand it to the system contacts app.
