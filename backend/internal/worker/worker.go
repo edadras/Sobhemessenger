@@ -29,9 +29,12 @@ type Runner struct {
 	bus       *bus.Bus
 	storage   *storage.Client
 	messaging *messaging.Repository
-	mediaRepo *media.Repository
-	scanner   media.Scanner
-	search    *search.Client
+	// messagingSvc publishes scheduled messages, which needs the broadcast
+	// the service owns rather than the repository alone.
+	messagingSvc *messaging.Service
+	mediaRepo    *media.Repository
+	scanner      media.Scanner
+	search       *search.Client
 
 	notificationsRepo *notifications.Repository
 	notificationsSvc  *notifications.Service
@@ -43,6 +46,9 @@ type Runner struct {
 
 	stop chan struct{}
 	done chan struct{}
+	// schedulerDone is separate from done because the two loops stop
+	// independently and Stop waits for both.
+	schedulerDone chan struct{}
 }
 
 func New(
@@ -51,6 +57,7 @@ func New(
 	messageBus *bus.Bus,
 	storageClient *storage.Client,
 	messagingRepo *messaging.Repository,
+	messagingSvc *messaging.Service,
 	mediaRepo *media.Repository,
 	notificationsRepo *notifications.Repository,
 	notificationsSvc *notifications.Service,
@@ -61,7 +68,7 @@ func New(
 ) *Runner {
 	return &Runner{
 		db: db, cache: cacheClient, bus: messageBus, storage: storageClient,
-		messaging: messagingRepo, mediaRepo: mediaRepo,
+		messaging: messagingRepo, messagingSvc: messagingSvc, mediaRepo: mediaRepo,
 		scanner: media.NewScanner(cfg.Media.ClamAVAddr),
 		search:  searchClient,
 
@@ -71,6 +78,7 @@ func New(
 
 		cfg: cfg, metrics: metrics, logger: logger,
 		stop: make(chan struct{}), done: make(chan struct{}),
+		schedulerDone: make(chan struct{}),
 	}
 }
 
@@ -100,21 +108,75 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 
 	go r.maintenanceLoop(ctx)
+	go r.schedulerLoop(ctx)
 	return nil
 }
 
 func (r *Runner) Stop(ctx context.Context) {
 	close(r.stop)
-	select {
-	case <-r.done:
-	case <-ctx.Done():
-		r.logger.Warn("maintenance loop did not stop before the deadline")
+
+	// Both loops are waited on: returning while the publisher is mid-batch
+	// would cut a transaction short during a deploy.
+	for _, loop := range []struct {
+		name string
+		done <-chan struct{}
+	}{
+		{"maintenance", r.done},
+		{"scheduler", r.schedulerDone},
+	} {
+		select {
+		case <-loop.done:
+		case <-ctx.Done():
+			r.logger.Warn("a worker loop did not stop before the deadline",
+				slog.String("loop", loop.name))
+			return
+		}
 	}
 }
 
 // maintenanceInterval is how often the housekeeping pass runs. Everything it
 // does is idempotent, so several workers may run it concurrently.
 const maintenanceInterval = 15 * time.Minute
+
+// schedulerInterval is how often due messages are published.
+//
+// It is far shorter than the maintenance pass because the delay is visible to
+// a user: a message scheduled for 10:00 that arrives at 10:14 is late, while
+// housekeeping that runs a quarter of an hour after it could have is not.
+const schedulerInterval = 15 * time.Second
+
+// schedulerBatch bounds one pass, so a large backlog is drained steadily
+// instead of in a single long transaction.
+const schedulerBatch = 200
+
+// schedulerLoop publishes scheduled messages when their time comes.
+//
+// Several workers may run this at once: the claim uses FOR UPDATE SKIP LOCKED,
+// so each message is published exactly once no matter how many are polling.
+func (r *Runner) schedulerLoop(ctx context.Context) {
+	defer close(r.schedulerDone)
+
+	ticker := time.NewTicker(schedulerInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			published, err := r.messagingSvc.PublishDue(ctx, schedulerBatch)
+			if err != nil {
+				r.logger.Error("scheduled message publisher failed", slog.Any("error", err))
+				continue
+			}
+			if published > 0 {
+				r.logger.Info("published scheduled messages", slog.Int("count", published))
+			}
+		case <-r.stop:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
 
 func (r *Runner) maintenanceLoop(ctx context.Context) {
 	defer close(r.done)

@@ -22,6 +22,7 @@ import (
 	"github.com/sobh/messenger/backend/internal/messaging"
 	"github.com/sobh/messenger/backend/internal/notifications"
 	"github.com/sobh/messenger/backend/internal/observability"
+	"github.com/sobh/messenger/backend/internal/ratelimit"
 	"github.com/sobh/messenger/backend/internal/search"
 	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/worker"
@@ -70,8 +71,15 @@ func main() {
 	notificationsRepo := notifications.NewRepository(db)
 	searchClient := search.New(cfg.Search)
 
+	// The publisher broadcasts what it publishes, so it needs the messaging
+	// service and not just the repository.
+	messagingRepo := messaging.NewRepository(db)
+	messagingSvc := messaging.NewService(messagingRepo, messageBus,
+		ratelimit.New(cacheClient, metrics), ratelimit.NewRules(cfg.RateLimits),
+		metrics, logger)
+
 	runner := worker.New(db, cacheClient, messageBus, storageClient,
-		messaging.NewRepository(db), media.NewRepository(db),
+		messagingRepo, messagingSvc, media.NewRepository(db),
 		notificationsRepo, notifications.NewService(notificationsRepo, messageBus),
 		searchClient, cfg, metrics, logger)
 	if err := runner.Start(ctx); err != nil {

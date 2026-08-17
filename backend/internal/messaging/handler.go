@@ -35,12 +35,12 @@ func (h *Handler) RegisterChatRoutes(r chi.Router) {
 	r.Post("/{chatID}/typing", h.typing)
 }
 
-func (h *Handler) MessageRoutes() http.Handler {
-	r := chi.NewRouter()
+// RegisterMessageRoutes adds the per-message routes to a shared router, so
+// pinning can register alongside them rather than needing a second mount.
+func (h *Handler) RegisterMessageRoutes(r chi.Router) {
 	r.Patch("/{messageID}", h.edit)
 	r.Delete("/{messageID}", h.delete)
 	r.Post("/{messageID}/reactions", h.react)
-	return r
 }
 
 func (h *Handler) SyncRoutes() http.Handler {

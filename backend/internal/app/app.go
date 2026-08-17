@@ -22,6 +22,7 @@ import (
 
 	"github.com/sobh/messenger/backend/internal/admin"
 	"github.com/sobh/messenger/backend/internal/auth"
+	"github.com/sobh/messenger/backend/internal/bots"
 	"github.com/sobh/messenger/backend/internal/bus"
 	"github.com/sobh/messenger/backend/internal/cache"
 	"github.com/sobh/messenger/backend/internal/calls"
@@ -43,8 +44,10 @@ import (
 	"github.com/sobh/messenger/backend/internal/realtime"
 	"github.com/sobh/messenger/backend/internal/search"
 	"github.com/sobh/messenger/backend/internal/secretchat"
+	"github.com/sobh/messenger/backend/internal/stickers"
 	"github.com/sobh/messenger/backend/internal/storage"
 	"github.com/sobh/messenger/backend/internal/stories"
+	"github.com/sobh/messenger/backend/internal/users"
 )
 
 // App holds every long-lived dependency and the servers built on top of them.
@@ -60,6 +63,9 @@ type App struct {
 
 	Auth          *auth.Service
 	AuthRepo      *auth.Repository
+	Users         *users.Service
+	Bots          *bots.Service
+	Stickers      *stickers.Service
 	Contacts      *contacts.Service
 	SecretChat    *secretchat.Service
 	Messaging     *messaging.Service
@@ -175,6 +181,12 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	messagingRepo := messaging.NewRepository(db)
 	messagingService := messaging.NewService(messagingRepo, messageBus, limiter, rules, metrics, logger)
 
+	usersService := users.NewService(users.NewRepository(db))
+	// Bots post through the messaging service, so they are bound by the same
+	// membership, permission and rate-limit rules as anyone else.
+	botsService := bots.NewService(bots.NewRepository(db), messagingService, logger)
+	stickersService := stickers.NewService(stickers.NewRepository(db))
+
 	contactsService := contacts.NewService(contacts.NewRepository(db), limiter, rules, cfg.Auth)
 	secretChatService := secretchat.NewService(secretchat.NewRepository(db), messagingRepo,
 		messageBus, logger)
@@ -220,6 +232,7 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 		cfg: cfg, logger: logger, metrics: metrics,
 		DB: db, Cache: cacheClient, Bus: messageBus, Storage: storageClient,
 		Auth: authService, AuthRepo: authRepo, Messaging: messagingService,
+		Users: usersService, Bots: botsService, Stickers: stickersService,
 		Contacts: contactsService, SecretChat: secretChatService,
 		Media: mediaService, Groups: groupsService, Communities: communitiesService,
 		Stories: storiesService, Polls: pollsService, Calls: callsService,
@@ -274,6 +287,9 @@ func (a *App) buildRouter(
 	r.Get("/ready", health.Ready)
 
 	authHandler := auth.NewHandler(authService)
+	usersHandler := users.NewHandler(a.Users)
+	botsHandler := bots.NewHandler(a.Bots)
+	stickersHandler := stickers.NewHandler(a.Stickers)
 	contactsHandler := contacts.NewHandler(a.Contacts)
 	secretChatHandler := secretchat.NewHandler(a.SecretChat)
 	messagingHandler := messaging.NewHandler(messagingService)
@@ -302,6 +318,10 @@ func (a *App) buildRouter(
 		api.Use(httpx.Timeout(30 * time.Second))
 
 		api.Mount("/auth", authHandler.Routes(authMiddleware.RequireAuth))
+
+		// The Bot API carries its own authentication — a bot token, not a
+		// session — so it is mounted outside the signed-in group (§20).
+		api.Mount("/bot", botsHandler.APIRoutes())
 		api.Get("/feature-flags", flagsHandler.List)
 
 		// The news feed is readable without an account; OptionalAuth fills in
@@ -314,15 +334,22 @@ func (a *App) buildRouter(
 		api.Group(func(private chi.Router) {
 			private.Use(authMiddleware.RequireAuth)
 
+			private.Mount("/users", usersHandler.Routes())
+			private.Mount("/bots", botsHandler.ManagementRoutes())
+			private.Mount("/stickers", stickersHandler.Routes())
 			private.Mount("/contacts", contactsHandler.Routes())
 			// The server's half of end-to-end encryption: a key directory and a
 			// mailbox for ciphertext it cannot read (§24).
 			private.Mount("/secret", secretChatHandler.Routes())
 			private.Route("/chats", func(chats chi.Router) {
 				messagingHandler.RegisterChatRoutes(chats)
+				messagingHandler.RegisterOrganiseRoutes(chats)
 				groupsHandler.RegisterRoutes(chats)
 			})
-			private.Mount("/messages", messagingHandler.MessageRoutes())
+			private.Route("/messages", func(messages chi.Router) {
+				messagingHandler.RegisterMessageRoutes(messages)
+				messagingHandler.RegisterPinRoute(messages)
+			})
 			private.Mount("/sync", messagingHandler.SyncRoutes())
 			if mediaHandler != nil {
 				private.Mount("/media", mediaHandler.Routes())

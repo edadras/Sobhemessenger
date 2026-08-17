@@ -54,7 +54,10 @@ type SendInput struct {
 	ReplyToID       *uuid.UUID
 	Attachments     []Attachment
 	Mentions        []uuid.UUID
-	IsSilent        bool
+	// Forward is set when this send is a forward, and names the original
+	// author rather than the person passing it on.
+	Forward  *ForwardInfo
+	IsSilent bool
 }
 
 // Send validates, authorises, persists and broadcasts a message.
@@ -114,6 +117,7 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		ReplyToID:       in.ReplyToID,
 		Attachments:     in.Attachments,
 		MentionUserIDs:  in.Mentions,
+		Forward:         in.Forward,
 		IsSilent:        in.IsSilent,
 	})
 	if err != nil {
