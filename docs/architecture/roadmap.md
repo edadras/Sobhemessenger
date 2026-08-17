@@ -27,9 +27,9 @@ A feature is complete only when all of the following hold:
 | 01 | Foundation — config, logging, dependencies, probes | done |
 | 02 | Database — full schema, migrations, seeds | done |
 | 03 | Authentication — OTP, JWT, refresh rotation, 2FA, sessions | done |
-| 04 | Users — profiles, privacy, contacts | done: discovery by HMAC digest, blocking, privacy resolved per viewer in SQL |
+| 04 | Users — profiles, privacy, contacts | done: discovery by HMAC digest, blocking, privacy resolved per viewer in SQL, profile editing and username claiming with a 30-day release hold |
 | 05 | WebSocket — hub, heartbeat, acks, sync, cross-node routing | done |
-| 06 | Messaging — send, edit, delete, react, read, drafts | done |
+| 06 | Messaging — send, edit, delete, react, read, drafts | done, plus forwarding with attribution, pinning, scheduling and per-member archive and mute |
 | 07 | Media — upload sessions, validation, variants | done, including the mobile composer and renderers |
 | 08 | Groups — roles, permissions, invites, join requests | done |
 | 09 | Channels — posts, statistics, discussion links | done |
@@ -47,6 +47,8 @@ A feature is complete only when all of the following hold:
 | 21 | Integration | done: the real router driven over HTTP and WebSocket against real dependencies |
 | 22 | Load testing (§78) | partial: harness run against the assembled stack and passing; the 500k ramp needs a cluster |
 | 23 | Production | not started |
+| 24 | Bots — registration, tokens, updates, webhooks | done: registration open to any account, hashed tokens, durable update queue, signed webhooks. Inline queries are not built |
+| 25 | Stickers and link previews | done: sets with per-user installation, OpenGraph unfurling behind the SSRF guard |
 
 ## Secret chats (§24)
 
@@ -59,6 +61,14 @@ server and is not yet written on the device. Per §84 rules 16 and 17 it will
 use a reviewed implementation rather than a hand-rolled one.
 
 ## What is left
+
+**Location and contact messages.** Both types are in the message-type
+constraint and neither can be composed or rendered. This is client work with a
+small server surface, not a subsystem.
+
+**Inline queries.** A bot can be messaged and can reply. It cannot yet be
+invoked from another chat's compose box, which needs an inline-result protocol
+on the WebSocket as well as the REST side.
 
 **Load testing at scale.** `scripts/loadtest/messaging.js` implements the §78
 ramp to 500k concurrent with thresholds that fail on a missed §79 target. It

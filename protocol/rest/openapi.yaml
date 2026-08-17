@@ -26,6 +26,35 @@ tags:
   - name: Messages
   - name: Sync
   - name: Platform
+  - name: Contacts
+  - name: Secret chats
+  - name: Users
+  - name: Bots
+    description: |
+      Registering and managing bots, called by their owner with an ordinary
+      session token.
+  - name: Bot API
+    description: |
+      What a bot itself calls, authenticated by a bot token in the
+      Authorization header rather than in the path — a token in the URL lands
+      in every access log and proxy trace between the bot and the server.
+  - name: Stickers
+  - name: Groups and channels
+  - name: Communities
+  - name: Stories
+  - name: Polls
+  - name: Calls
+  - name: News
+    description: Reader-facing news. The feed and articles are public.
+  - name: Editorial
+    description: The newsroom's own surface; every operation needs an editorial role.
+  - name: Notifications
+  - name: Search
+  - name: Moderation
+  - name: Admin
+    description: |
+      Each operation needs a specific permission rather than a blanket "admin"
+      flag, and each one is written to the append-only audit log.
 
 security:
   - bearerAuth: []
@@ -321,6 +350,49 @@ paths:
                           chats:
                             type: array
                             items: { $ref: "#/components/schemas/Chat" }
+    post:
+      tags: [Groups and channels]
+      summary: Create a group or channel
+      description: |
+        The creator is made owner and the named members are added in the same
+        transaction, so a chat is never left with no owner or with members and
+        no creator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, title]
+              properties:
+                type: { type: string, enum: [group, channel] }
+                title: { type: string, maxLength: 128 }
+                description: { type: string, maxLength: 512 }
+                username:
+                  type: string
+                  description: Required for a public chat; it is how the chat is found and linked to.
+                is_public: { type: boolean, default: false }
+                member_ids:
+                  type: array
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        "201":
+          description: The new chat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Chat" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: That username is taken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /api/v1/chats/private:
     post:
@@ -988,12 +1060,2991 @@ paths:
                         properties:
                           acknowledged: { type: integer }
 
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: The caller's own profile
+      description: |
+        Privacy rules are not applied here: they exist to protect a user from
+        others, not from themselves. The phone number and birthday appear only
+        on this endpoint.
+      responses:
+        "200":
+          description: The caller's profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/SelfProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Users]
+      summary: Change part of the profile
+      description: |
+        Every field is optional and an omitted field is left alone, so a client
+        that only knows about some of them cannot erase the rest. Lengths are
+        counted in characters rather than bytes, so a Persian bio gets the same
+        280 as an English one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 64 }
+                about: { type: string, maxLength: 280 }
+                avatar_media_id: { type: string, format: uuid }
+                language: { type: string, enum: [fa, en, tr, ar] }
+                birthday: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/SelfProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/users/me/username:
+    put:
+      tags: [Users]
+      summary: Claim a username
+      description: |
+        Claiming a name releases whichever one the caller held before, and puts
+        that one on a 30-day hold. Without the hold, renaming would free the old
+        name instantly and let someone take over an identity that people still
+        have links to. The hold names its previous owner, so the caller can
+        always take their own old name back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  pattern: "^@?[A-Za-z][A-Za-z0-9_]{4,31}$"
+                  description: |
+                    Case-insensitive, a leading `@` is accepted and stripped.
+                    Only ASCII letters, digits and underscore: a username is
+                    typed from memory and read out of a link, so characters
+                    that look alike in different scripts are excluded rather
+                    than normalised.
+      responses:
+        "204": { description: The name is now the caller's }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Taken, reserved, or on hold for its previous owner
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/users/username-available:
+    get:
+      tags: [Users]
+      summary: Ask whether a username can be claimed
+      description: |
+        What a rename form calls as the user types. The answer is decided by
+        the same SQL function the claim uses, so the check and the claim cannot
+        disagree. The caller's own current name reports as available, because
+        re-submitting an unchanged form must not be an error.
+      parameters:
+        - in: query
+          name: username
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Whether it is free, and if not, why
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          username: { type: string }
+                          available: { type: boolean }
+                          reason:
+                            type: string
+                            enum: [invalid, reserved, taken]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/users/by-username/{username}:
+    get:
+      tags: [Users]
+      summary: Resolve a public handle
+      description: How a `@someone` link is opened.
+      parameters:
+        - in: path
+          name: username
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The profile behind the handle
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/users/{userID}:
+    get:
+      tags: [Users]
+      summary: One user's profile as the caller may see it
+      description: |
+        The privacy rules of §55 are applied in the same query that reads the
+        row, so there is no window in which the server holds data it must
+        remember to strip. A field the caller may not see is absent rather than
+        empty.
+      parameters:
+        - in: path
+          name: userID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/{chatID}/forward:
+    post:
+      tags: [Messages]
+      summary: Forward messages into another chat
+      description: |
+        The destination is checked before the sources: being able to read a
+        message says nothing about being allowed to post it somewhere else.
+        Membership of the source chat is joined into the query that reads the
+        messages rather than checked afterwards, so naming a guessable message
+        id in a chat the caller is not in returns nothing rather than leaking
+        the row.
+
+        Forwarding a forward keeps crediting whoever wrote the message, so a
+        long chain does not slowly reassign authorship to the last person who
+        passed it on.
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_chat_id, message_ids]
+              properties:
+                to_chat_id: { type: string, format: uuid }
+                message_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, format: uuid }
+                drop_author:
+                  type: boolean
+                  default: false
+                  description: Forward the text without naming the original author.
+      responses:
+        "201":
+          description: The messages as they now exist in the destination
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          messages:
+                            type: array
+                            items: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Not a member of the destination chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/{chatID}/pinned:
+    get:
+      tags: [Messages]
+      summary: What is pinned in a chat
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      responses:
+        "200":
+          description: Pinned messages, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          messages:
+                            type: array
+                            items: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/messages/{messageID}/pin:
+    put:
+      tags: [Messages]
+      summary: Pin or unpin a message
+      description: |
+        Needs the chat's pin permission, because a pin is shown to everyone in
+        the chat rather than only to the person who set it.
+      parameters:
+        - in: path
+          name: messageID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pinned]
+              properties:
+                pinned: { type: boolean }
+      responses:
+        "204": { description: Done; every member is told over the chat subject }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The caller cannot pin in this chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/{chatID}/flags:
+    put:
+      tags: [Chats]
+      summary: Pin or archive a chat for the caller
+      description: |
+        These are per member, not per chat: one person archiving a group must
+        not archive it for everyone else in it. An omitted field is left alone,
+        so unarchiving is not also an instruction to unpin.
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pinned: { type: boolean, nullable: true }
+                archived: { type: boolean, nullable: true }
+      responses:
+        "204": { description: Done }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Not a member of this chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/chats/{chatID}/mute:
+    put:
+      tags: [Chats]
+      summary: Mute a chat until a time
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                muted_until:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: |
+                    Null unmutes. A far-future time is how a client says
+                    "for ever" without a separate flag to keep in step.
+      responses:
+        "204": { description: Done }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Not a member of this chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/chats/{chatID}/scheduled:
+    get:
+      tags: [Messages]
+      summary: The caller's queued posts in this chat
+      description: |
+        Private to their author: another member of the chat sees nothing here,
+        because a queued post is a draft rather than part of the conversation.
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      responses:
+        "200":
+          description: Queued posts, soonest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          messages:
+                            type: array
+                            items: { $ref: "#/components/schemas/ScheduledMessage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Messages]
+      summary: Queue a post for later
+      description: |
+        A queued post is not a message yet: it has no sequence number and does
+        not appear in anyone's history. It becomes one at publication, through
+        the ordinary send path, so ordering follows when a message became
+        visible rather than when it was written.
+
+        `client_message_id` is required and is carried through to the published
+        message. That is what makes both this call and the publication itself
+        idempotent: re-submitting the same compose request edits the queued post
+        rather than queueing a second copy, and a publisher that dies before
+        recording its result re-sends to the same message rather than a new one.
+
+        The author's right to post is re-checked at publication, not trusted
+        from now — they may be muted, restricted or removed in between.
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_message_id, scheduled_at]
+              properties:
+                client_message_id: { type: string, format: uuid }
+                type:
+                  type: string
+                  default: text
+                  enum: [text, image, video, audio, voice, file, location, contact, sticker, gif, poll]
+                content: { type: string }
+                attachments:
+                  type: array
+                  items: { $ref: "#/components/schemas/Attachment" }
+                reply_to_id: { type: string, format: uuid, nullable: true }
+                is_silent: { type: boolean, default: false }
+                scheduled_at:
+                  type: string
+                  format: date-time
+                  description: |
+                    At least 10 seconds ahead and at most a year, so a typo
+                    cannot park a row indefinitely.
+      responses:
+        "201":
+          description: The queued post
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/ScheduledMessage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The caller cannot post in this chat
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "409":
+          description: That client_message_id names a message that has already been sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/chats/{chatID}/scheduled/{scheduledID}:
+    delete:
+      tags: [Messages]
+      summary: Cancel a queued post
+      description: |
+        `scheduledID` is the id of the queued post, not of a message: a post
+        that has not published has no message id yet.
+      parameters:
+        - $ref: "#/components/parameters/ChatID"
+        - in: path
+          name: scheduledID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Removed from the queue }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/bots:
+    get:
+      tags: [Bots]
+      summary: The bots the caller owns
+      responses:
+        "200":
+          description: The caller's bots
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          bots:
+                            type: array
+                            items: { $ref: "#/components/schemas/Bot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Bots]
+      summary: Register a bot
+      description: |
+        Anyone with an account may register a bot; this is the equivalent of
+        Telegram's BotFather, as an ordinary API rather than a conversation with
+        another bot.
+
+        A bot is created as an ordinary user row carrying `is_bot`, which is why
+        every existing membership, permission and delivery path works on it
+        unchanged rather than needing a parallel implementation.
+
+        The response carries the bot's first token in full. **It is shown once
+        and never again**: only a SHA-256 hash is stored, so a lost token is
+        replaced rather than recovered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, display_name]
+              properties:
+                username:
+                  type: string
+                  pattern: "^[a-z][a-z0-9_]{3,27}bot$"
+                  description: |
+                    Must end in `bot`. The suffix is a visible, unforgeable
+                    signal to whoever is talking to it: a person can tell from
+                    the handle alone that there is no human on the other end.
+                display_name: { type: string, maxLength: 64 }
+                description: { type: string, maxLength: 512 }
+      responses:
+        "201":
+          description: The bot, with its first token shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          bot: { $ref: "#/components/schemas/Bot" }
+                          token: { $ref: "#/components/schemas/IssuedToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: That username is taken, or the caller has too many bots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/bots/{botID}:
+    get:
+      tags: [Bots]
+      summary: One of the caller's bots
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      responses:
+        "200":
+          description: The bot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Bot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Bots]
+      summary: Change a bot's settings
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 64 }
+                description: { type: string, maxLength: 512 }
+                about: { type: string, maxLength: 280 }
+                can_join_groups: { type: boolean }
+                privacy_mode:
+                  type: boolean
+                  description: |
+                    On by default. With it on the bot is sent only messages
+                    addressed to it — commands, replies and mentions. The filter
+                    is applied in SQL at the point updates are selected, so a
+                    bot is never handed a message it is not entitled to see and
+                    then trusted to discard it.
+                inline_enabled: { type: boolean }
+                inline_placeholder: { type: string, maxLength: 64 }
+                is_active:
+                  type: boolean
+                  description: Deactivating stops every token at once.
+      responses:
+        "200":
+          description: The updated bot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Bot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/bots/{botID}/tokens:
+    get:
+      tags: [Bots]
+      summary: A bot's live tokens, without their secrets
+      description: |
+        Only a short prefix of each token is stored in the clear, which is
+        enough to tell two of them apart in a list and useless as a credential.
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      responses:
+        "200":
+          description: The tokens
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          tokens:
+                            type: array
+                            items: { $ref: "#/components/schemas/BotToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Bots]
+      summary: Issue another token
+      description: |
+        A bot may hold up to five live tokens at once, so a rotation can bring
+        the new one into service before retiring the old one — otherwise every
+        rotation would be an outage. The secret is shown once.
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 64 }
+      responses:
+        "201":
+          description: The new token, shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/IssuedToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: That bot already holds the maximum number of tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/bots/{botID}/tokens/{tokenID}:
+    delete:
+      tags: [Bots]
+      summary: Revoke a token
+      description: Revocation takes effect on the next request; there is no cache to wait out.
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+        - in: path
+          name: tokenID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/bots/{botID}/commands:
+    get:
+      tags: [Bots]
+      summary: A bot's advertised commands
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      responses:
+        "200":
+          description: The commands
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          commands:
+                            type: array
+                            items: { $ref: "#/components/schemas/BotCommand" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Bots]
+      summary: Replace the command list
+      description: |
+        The list is replaced wholesale rather than merged, so what the client
+        sends is exactly what users will be offered.
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commands:
+                  type: array
+                  maxItems: 100
+                  items: { $ref: "#/components/schemas/BotCommand" }
+      responses:
+        "204": { description: Replaced }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/bots/{botID}/webhook:
+    get:
+      tags: [Bots]
+      summary: The bot's webhook registration, without its secret
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      responses:
+        "200":
+          description: The registration, or null if there is none
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/BotWebhook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Bots]
+      summary: Register a webhook
+      description: |
+        The URL must be https and must resolve to a public address. It is
+        checked through the same guard the link unfurler uses: the resolved
+        address is validated in the dialer itself rather than before the dial,
+        which closes the window in which a name resolves to a public address on
+        the check and a private one on the connection.
+
+        Registering returns a secret, shown once. Every delivery carries an
+        `X-SOBH-Signature` header holding the HMAC-SHA256 of the body under that
+        secret, so the receiver can tell a real delivery from anyone who has
+        learned the URL.
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                max_connections: { type: integer, minimum: 1, maximum: 100, default: 40 }
+                allowed_updates:
+                  type: array
+                  items: { type: string }
+                  description: An empty list means every kind of update.
+      responses:
+        "200":
+          description: The signing secret, shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          secret: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          description: The URL is not https, or does not resolve to a public address
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+    delete:
+      tags: [Bots]
+      summary: Remove the webhook and go back to polling
+      parameters:
+        - $ref: "#/components/parameters/BotID"
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/bot/me:
+    get:
+      tags: [Bot API]
+      summary: Who this token belongs to
+      security:
+        - botToken: []
+      responses:
+        "200":
+          description: The authenticated bot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Bot" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/bot/updates:
+    get:
+      tags: [Bot API]
+      summary: Poll for updates
+      description: |
+        Updates are queued durably and handed over in order. A bot confirms what
+        it has processed by asking for the next `offset`, so a bot that restarts
+        mid-batch resumes where it left off rather than losing the batch — the
+        queue is not a fan-out buffer that a disconnection empties.
+
+        The backlog is bounded per bot. A bot that stops polling for long enough
+        loses its oldest updates rather than growing without limit, which keeps
+        one abandoned bot from filling the table.
+      security:
+        - botToken: []
+      parameters:
+        - in: query
+          name: offset
+          schema: { type: integer, format: int64 }
+          description: |
+            Confirms every update below this id and asks for what follows.
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        "200":
+          description: The next updates in order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          updates:
+                            type: array
+                            items: { $ref: "#/components/schemas/BotUpdate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/bot/messages:
+    post:
+      tags: [Bot API]
+      summary: Send a message as the bot
+      description: |
+        The bot posts as itself, through the ordinary send path and subject to
+        the ordinary membership and permission checks — being a bot is not a way
+        around them.
+      security:
+        - botToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id]
+              properties:
+                chat_id: { type: string, format: uuid }
+                content: { type: string }
+                reply_to_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "201":
+          description: The message as sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The bot is not a member of that chat, or may not post in it
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/bot/commands:
+    put:
+      tags: [Bot API]
+      summary: Replace the command list, as the bot
+      security:
+        - botToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commands:
+                  type: array
+                  items: { $ref: "#/components/schemas/BotCommand" }
+      responses:
+        "204": { description: Replaced }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/bot/webhook:
+    put:
+      tags: [Bot API]
+      summary: Register a webhook, as the bot
+      security:
+        - botToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                max_connections: { type: integer, default: 40 }
+                allowed_updates:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: The signing secret, shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          secret: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Bot API]
+      summary: Remove the webhook, as the bot
+      security:
+        - botToken: []
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/stickers:
+    get:
+      tags: [Stickers]
+      summary: The sets the caller has installed
+      description: |
+        The images come back with the sets rather than needing a call each, so
+        opening the picker is one request.
+      responses:
+        "200":
+          description: Installed sets, in the caller's order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          sets:
+                            type: array
+                            items: { $ref: "#/components/schemas/StickerSet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Stickers]
+      summary: Create a sticker set
+      description: |
+        The set and all its stickers are written in one transaction, so a set
+        naming media that was never uploaded is refused whole rather than
+        leaving a half-built pack behind.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, title, stickers]
+              properties:
+                slug:
+                  type: string
+                  pattern: "^[a-z][a-z0-9_]{2,31}$"
+                  description: Appears in the share link, so it is held to the same alphabet as a username.
+                title: { type: string }
+                kind: { type: string, default: static, enum: [static, animated, video] }
+                stickers:
+                  type: array
+                  minItems: 1
+                  maxItems: 120
+                  items:
+                    type: object
+                    required: [media_id]
+                    properties:
+                      media_id: { type: string, format: uuid }
+                      emoji: { type: string }
+      responses:
+        "201":
+          description: The set, with its stickers in submitted order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/StickerSet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: That slug is taken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/stickers/search:
+    get:
+      tags: [Stickers]
+      summary: Find sets by title, slug or the emoji their stickers carry
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        "200":
+          description: Matching sets, official ones first. Always a list, never null.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          sets:
+                            type: array
+                            items: { $ref: "#/components/schemas/StickerSet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/stickers/link-preview:
+    get:
+      tags: [Stickers]
+      summary: Unfurl a link
+      description: |
+        The cache is shared across users deliberately: fetching the same news
+        article once per recipient would turn a popular link into an accidental
+        attack on whoever published it. A failure is cached too, so a dead link
+        is not re-fetched every time a chat is opened.
+
+        Unfurling reaches a stranger's server on a user's say-so, so the address
+        is the security boundary. Loopback, link-local — including the cloud
+        metadata endpoint — and private ranges are all refused, redirects are
+        re-validated, and the read is bounded: the metadata is in the head,
+        so there is no reason to read an endless page.
+      parameters:
+        - in: query
+          name: url
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        "200":
+          description: The preview
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/LinkPreview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: The link has no preview, or could not be fetched
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "422":
+          description: Not a resolvable public http or https URL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/stickers/{slug}:
+    get:
+      tags: [Stickers]
+      summary: One set by its slug
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The set, with `is_added` for the caller
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/StickerSet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/stickers/{setID}/added:
+    put:
+      tags: [Stickers]
+      summary: Install a set
+      description: Installing twice is what a double tap does, so it is not an error.
+      parameters:
+        - in: path
+          name: setID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Installed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Stickers]
+      summary: Remove an installed set
+      parameters:
+        - in: path
+          name: setID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/discover:
+    get:
+      tags: [Groups and channels]
+      summary: Public groups and channels
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: Public chats matching the query
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          chats: { type: array, items: { $ref: "#/components/schemas/Chat" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/chats/join/{slug}:
+    post:
+      tags: [Groups and channels]
+      summary: Join through an invite link
+      description: |
+        The slug is the link's own secret, so it is checked against the link's
+        member limit and expiry rather than against the chat's public setting.
+        A revoked link stops working immediately.
+      parameters:
+        - { in: path, name: slug, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The chat that was joined, or the pending join request
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Chat" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The link has expired or been revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/chats/{chatID}:
+    patch:
+      tags: [Groups and channels]
+      summary: Change a chat's title, description, username or photo
+      description: An omitted field is left alone.
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, nullable: true }
+                description: { type: string, nullable: true }
+                username: { type: string, nullable: true }
+                photo_media_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "204": { description: Updated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Groups and channels]
+      summary: Delete a chat
+      description: Owner only. The chat is tombstoned rather than erased, so message history stays referentially intact.
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/join:
+    post:
+      tags: [Groups and channels]
+      summary: Join a public chat
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "200":
+          description: The chat, or a pending request when approval is required
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Chat" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/leave:
+    post:
+      tags: [Groups and channels]
+      summary: Leave a chat
+      description: |
+        Membership is ended rather than deleted, so the messages the caller sent
+        keep their author.
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "204": { description: Left }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: The owner must transfer ownership before leaving
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/chats/{chatID}/members:
+    get:
+      tags: [Groups and channels]
+      summary: List members
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: query, name: role, schema: { type: string, enum: [owner, admin, moderator, member, restricted] } }
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: The members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          members: { type: array, items: { $ref: "#/components/schemas/Membership" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Groups and channels]
+      summary: Add members
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_ids]
+              properties:
+                user_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: How many were added; users who block the caller are skipped rather than failing the batch
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          added: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/chats/{chatID}/members/{userID}:
+    delete:
+      tags: [Groups and channels]
+      summary: Remove a member
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/members/{userID}/role:
+    put:
+      tags: [Groups and channels]
+      summary: Set a member's role, permissions and title
+      description: |
+        Nobody may grant a role at or above their own, so an admin cannot
+        promote themselves or another admin to owner.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [admin, moderator, member, restricted] }
+                permissions:
+                  type: object
+                  additionalProperties: { type: boolean }
+                custom_title: { type: string, maxLength: 32 }
+      responses:
+        "204": { description: Set }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/transfer-ownership:
+    post:
+      tags: [Groups and channels]
+      summary: Hand ownership to another member
+      description: One transaction, so a chat is never left with two owners or none.
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "204": { description: Transferred }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/settings:
+    get:
+      tags: [Groups and channels]
+      summary: A chat's settings
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "200":
+          description: The settings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/ChatSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Groups and channels]
+      summary: Change a chat's settings
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatSettings" }
+      responses:
+        "204": { description: Updated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/invite-links:
+    get:
+      tags: [Groups and channels]
+      summary: The chat's invite links
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "200":
+          description: The links
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          links: { type: array, items: { $ref: "#/components/schemas/InviteLink" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Groups and channels]
+      summary: Create an invite link
+      description: |
+        Several links can be live at once, each with its own limit and expiry,
+        so one can be revoked without cutting off everyone else who was invited.
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                member_limit: { type: integer, nullable: true, minimum: 1 }
+                expires_at: { type: string, format: date-time, nullable: true }
+      responses:
+        "201":
+          description: The new link
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/InviteLink" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/invite-links/{linkID}:
+    delete:
+      tags: [Groups and channels]
+      summary: Revoke an invite link
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: linkID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Revoked; it stops working immediately }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/join-requests:
+    get:
+      tags: [Groups and channels]
+      summary: Pending join requests
+      parameters: [{ $ref: "#/components/parameters/ChatID" }]
+      responses:
+        "200":
+          description: The pending requests
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          requests: { type: array, items: { $ref: "#/components/schemas/JoinRequest" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/join-requests/{userID}:
+    post:
+      tags: [Groups and channels]
+      summary: Approve or decline a join request
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+      responses:
+        "204": { description: Resolved }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/messages/{messageID}/view:
+    post:
+      tags: [Groups and channels]
+      summary: Record a channel post view
+      description: |
+        Counted once per user rather than per request, so reopening a channel
+        does not inflate the number.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: messageID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Counted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/chats/{chatID}/statistics:
+    get:
+      tags: [Groups and channels]
+      summary: Channel statistics
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: query, name: days, schema: { type: integer, default: 7, maximum: 90 } }
+      responses:
+        "200":
+          description: Member and view counts over the window
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/communities:
+    get:
+      tags: [Communities]
+      summary: The caller's communities
+      responses:
+        "200":
+          description: The communities
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          communities: { type: array, items: { $ref: "#/components/schemas/Community" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Communities]
+      summary: Create a community
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                username: { type: string }
+                is_public: { type: boolean, default: false }
+      responses:
+        "201":
+          description: The community
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Community" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/communities/{communityID}:
+    get:
+      tags: [Communities]
+      summary: One community and its rooms
+      parameters:
+        - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The community
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Community" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/communities/{communityID}/join:
+    post:
+      tags: [Communities]
+      summary: Join a community
+      description: Joining the community joins its default rooms, so a new member arrives somewhere rather than to an empty list.
+      parameters:
+        - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Joined }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/communities/{communityID}/leave:
+    post:
+      tags: [Communities]
+      summary: Leave a community and all of its rooms
+      parameters:
+        - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Left }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/communities/{communityID}/rooms:
+    post:
+      tags: [Communities]
+      summary: Add a chat to a community as a room
+      parameters:
+        - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id]
+              properties:
+                chat_id: { type: string, format: uuid }
+                section: { type: string, default: general }
+                position: { type: integer, default: 0 }
+      responses:
+        "204": { description: Added }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/communities/{communityID}/rooms/{chatID}:
+    delete:
+      tags: [Communities]
+      summary: Remove a room from a community
+      description: The chat itself survives; only its place in the community is removed.
+      parameters:
+        - { in: path, name: communityID, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/stories:
+    get:
+      tags: [Stories]
+      summary: The caller's story feed
+      description: |
+        Only stories the caller is allowed to see: the privacy list of each
+        story is applied in the query rather than filtered afterwards.
+      responses:
+        "200":
+          description: Live stories, grouped by author
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          stories: { type: array, items: { $ref: "#/components/schemas/Story" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Stories]
+      summary: Post a story
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [photo, video, text] }
+                media_id: { type: string, format: uuid, nullable: true }
+                channel_chat_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Post as a channel rather than as the caller.
+                caption: { type: string }
+                background: { type: string }
+                privacy: { type: string, enum: [everyone, contacts, close_friends, selected], default: contacts }
+                allow_list: { type: array, items: { type: string, format: uuid } }
+                deny_list: { type: array, items: { type: string, format: uuid } }
+      responses:
+        "201":
+          description: The story
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Story" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/stories/close-friends:
+    get:
+      tags: [Stories]
+      summary: The caller's close-friends list
+      responses:
+        "200":
+          description: The list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          user_ids: { type: array, items: { type: string, format: uuid } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Stories]
+      summary: Replace the close-friends list
+      description: Replaced wholesale, so removing someone is one call rather than a diff the client has to compute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_ids: { type: array, items: { type: string, format: uuid } }
+      responses:
+        "204": { description: Replaced }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/stories/{storyID}/view:
+    post:
+      tags: [Stories]
+      summary: Record a view, optionally with a reaction
+      parameters:
+        - { in: path, name: storyID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reaction: { type: string, nullable: true }
+      responses:
+        "204": { description: Recorded }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/stories/{storyID}/viewers:
+    get:
+      tags: [Stories]
+      summary: Who has seen a story
+      description: The author only.
+      parameters:
+        - { in: path, name: storyID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The viewers and their reactions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          viewers: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/stories/{storyID}:
+    delete:
+      tags: [Stories]
+      summary: Delete a story before it expires
+      parameters:
+        - { in: path, name: storyID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/polls:
+    post:
+      tags: [Polls]
+      summary: Create a poll
+      description: |
+        The poll and the message that carries it are created together, so a
+        poll can never exist with nothing pointing at it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id, client_message_id, question, options]
+              properties:
+                chat_id: { type: string, format: uuid }
+                client_message_id: { type: string, format: uuid }
+                question: { type: string }
+                options: { type: array, minItems: 2, maxItems: 12, items: { type: string } }
+                is_anonymous: { type: boolean, default: true }
+                allows_multiple: { type: boolean, default: false }
+                is_quiz: { type: boolean, default: false }
+                correct_option:
+                  type: integer
+                  nullable: true
+                  description: Required for a quiz; withheld from voters until they answer.
+                closes_at: { type: string, format: date-time, nullable: true }
+      responses:
+        "201":
+          description: The poll
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Poll" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/polls/{pollID}:
+    get:
+      tags: [Polls]
+      summary: One poll with its current tallies
+      parameters:
+        - { in: path, name: pollID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The poll
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Poll" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/polls/{pollID}/vote:
+    post:
+      tags: [Polls]
+      summary: Vote
+      description: |
+        Re-voting replaces the caller's previous answer rather than adding to
+        it, and the tallies are recomputed in the same transaction so they can
+        never disagree with the votes they count.
+      parameters:
+        - { in: path, name: pollID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [option_ids]
+              properties:
+                option_ids: { type: array, minItems: 1, items: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The poll with updated tallies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Poll" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: The poll is closed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/polls/{pollID}/close:
+    post:
+      tags: [Polls]
+      summary: Close a poll
+      parameters:
+        - { in: path, name: pollID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Closed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/polls/{pollID}/options/{optionID}/voters:
+    get:
+      tags: [Polls]
+      summary: Who voted for an option
+      description: |
+        Refused for an anonymous poll. Anonymity is a promise made to the voter
+        at the moment they voted, so it is not something the author can lift
+        afterwards.
+      parameters:
+        - { in: path, name: pollID, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: optionID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The voters
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          voters: { type: array, items: { type: string, format: uuid } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The poll is anonymous
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/calls:
+    get:
+      tags: [Calls]
+      summary: Call history
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: Past calls, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          calls: { type: array, items: { $ref: "#/components/schemas/Call" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Calls]
+      summary: Start a call
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_id, type]
+              properties:
+                chat_id: { type: string, format: uuid }
+                type: { type: string, enum: [audio, video, group_audio, group_video] }
+      responses:
+        "201":
+          description: The call
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Call" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/calls/ice-servers:
+    get:
+      tags: [Calls]
+      summary: STUN and TURN servers for this call
+      description: |
+        TURN credentials are short-lived and derived per request, so a leaked
+        set stops working on its own rather than needing to be revoked.
+      responses:
+        "200":
+          description: The servers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          ice_servers:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                urls: { type: array, items: { type: string } }
+                                username: { type: string }
+                                credential: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/calls/{callID}:
+    get:
+      tags: [Calls]
+      summary: One call and its participants
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The call
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/Call" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/calls/{callID}/accept:
+    post:
+      tags: [Calls]
+      summary: Accept a call
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Accepted; the other side is told over the call subject }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/calls/{callID}/reject:
+    post:
+      tags: [Calls]
+      summary: Reject a call
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Rejected }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/calls/{callID}/end:
+    post:
+      tags: [Calls]
+      summary: End a call
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, default: hangup }
+      responses:
+        "204": { description: Ended }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/calls/{callID}/signal:
+    post:
+      tags: [Calls]
+      summary: Relay one WebRTC signalling message
+      description: |
+        The server relays offers, answers and candidates without inspecting
+        them: it is a post box for setting up a peer connection, and the media
+        never passes through it.
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, type, payload]
+              properties:
+                to: { type: string, format: uuid }
+                type: { type: string, enum: [offer, answer, ice-candidate] }
+                payload: { type: object, additionalProperties: true }
+      responses:
+        "204": { description: Relayed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/calls/{callID}/media:
+    put:
+      tags: [Calls]
+      summary: Announce mute, camera and screen-share state
+      parameters:
+        - { in: path, name: callID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_muted: { type: boolean, nullable: true }
+                video_enabled: { type: boolean, nullable: true }
+                screen_sharing: { type: boolean, nullable: true }
+      responses:
+        "204": { description: Announced to the other participants }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/news:
+    get:
+      tags: [News]
+      summary: The news feed
+      description: Public; no token required.
+      security: []
+      parameters:
+        - { in: query, name: category, schema: { type: string } }
+        - { in: query, name: locale, schema: { type: string, enum: [fa, en, tr, ar] } }
+        - { in: query, name: sort, schema: { type: string, enum: [latest, popular] } }
+        - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Published articles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          articles: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+
+  /api/v1/news/categories:
+    get:
+      tags: [News]
+      summary: News categories
+      security: []
+      responses:
+        "200":
+          description: The categories, with localised names
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          categories: { type: array, items: { type: object, additionalProperties: true } }
+
+  /api/v1/news/breaking:
+    get:
+      tags: [News]
+      summary: Breaking news
+      security: []
+      responses:
+        "200":
+          description: Articles flagged as breaking, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          articles: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+
+  /api/v1/news/articles/{slug}:
+    get:
+      tags: [News]
+      summary: One article by its slug
+      security: []
+      parameters:
+        - { in: path, name: slug, required: true, schema: { type: string } }
+        - { in: query, name: locale, schema: { type: string, enum: [fa, en, tr, ar] } }
+      responses:
+        "200":
+          description: The article
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/NewsArticle" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/news-reader/bookmarks:
+    get:
+      tags: [News]
+      summary: The caller's bookmarked articles
+      responses:
+        "200":
+          description: The bookmarks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          articles: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/news-reader/bookmarks/{articleID}:
+    put:
+      tags: [News]
+      summary: Bookmark an article
+      parameters:
+        - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Bookmarked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [News]
+      summary: Remove a bookmark
+      parameters:
+        - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/news-reader/follows:
+    put:
+      tags: [News]
+      summary: Follow or unfollow a category, tag or author
+      description: Exactly one of the three ids must be given.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [follow]
+              properties:
+                category_id: { type: string, format: uuid, nullable: true }
+                tag_id: { type: string, format: uuid, nullable: true }
+                author_id: { type: string, format: uuid, nullable: true }
+                follow: { type: boolean }
+      responses:
+        "204": { description: Applied }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/editorial/articles:
+    get:
+      tags: [Editorial]
+      summary: Articles in any state, for the newsroom
+      description: Requires an editorial role.
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [draft, review, scheduled, published, archived] } }
+        - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: The articles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          articles: { type: array, items: { $ref: "#/components/schemas/NewsArticle" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Editorial]
+      summary: Create an article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewsArticleInput" }
+      responses:
+        "201":
+          description: The article
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/NewsArticle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/editorial/articles/{articleID}:
+    get:
+      tags: [Editorial]
+      summary: One article in any state
+      parameters:
+        - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The article
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/NewsArticle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Editorial]
+      summary: Replace an article
+      parameters:
+        - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewsArticleInput" }
+      responses:
+        "200":
+          description: The updated article
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/NewsArticle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/editorial/articles/{articleID}/status:
+    post:
+      tags: [Editorial]
+      summary: Move an article through the workflow
+      description: |
+        Publishing requires the publish permission, which is separate from the
+        write permission — a writer can prepare an article without being able
+        to put it in front of readers.
+      parameters:
+        - { in: path, name: articleID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [draft, review, scheduled, published, archived] }
+                publish_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Required for `scheduled`; a worker publishes it when the time comes.
+      responses:
+        "200":
+          description: The article in its new state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/NewsArticle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/editorial/categories:
+    get:
+      tags: [Editorial]
+      summary: Categories, including hidden ones
+      responses:
+        "200":
+          description: The categories
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          categories: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Editorial]
+      summary: Create or update a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                slug: { type: string }
+                names:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: Keyed by locale, so a category is named in each language rather than translated at read time.
+                position: { type: integer }
+                is_visible: { type: boolean, default: true }
+      responses:
+        "200":
+          description: The category
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/editorial/categories/{categoryID}:
+    delete:
+      tags: [Editorial]
+      summary: Delete a category
+      parameters:
+        - { in: path, name: categoryID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Articles still refer to it
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/editorial/authors:
+    get:
+      tags: [Editorial]
+      summary: The newsroom's bylines
+      responses:
+        "200":
+          description: The authors
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          authors: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Editorial]
+      summary: Create or update a byline
+      description: |
+        A byline is not an account. It carries the name a piece is published
+        under, which is not always the name of whoever typed it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                id: { type: string, format: uuid, nullable: true }
+                user_id: { type: string, format: uuid, nullable: true }
+                display_name: { type: string }
+                bio: { type: string }
+                avatar_media_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "200":
+          description: The author
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: The caller's notifications
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+        - { in: query, name: unread_only, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Notifications, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          notifications: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: How many are unread
+      responses:
+        "200":
+          description: The count, for a badge
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          unread: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/notifications/read:
+    post:
+      tags: [Notifications]
+      summary: Mark notifications read
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string, format: uuid }
+                  description: An empty or absent list marks everything read.
+      responses:
+        "204": { description: Marked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/notifications/settings:
+    get:
+      tags: [Notifications]
+      summary: The caller's notification settings
+      responses:
+        "200":
+          description: The settings, including quiet hours
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Notifications]
+      summary: Change the notification settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "204": { description: Updated }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/notifications/tokens:
+    post:
+      tags: [Notifications]
+      summary: Register a push token for this device
+      description: |
+        Bound to the device the caller signed in with, so signing out of one
+        device does not silence the others.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, token]
+              properties:
+                provider: { type: string, enum: [fcm, apns, web] }
+                token: { type: string }
+                locale: { type: string, enum: [fa, en, tr, ar] }
+      responses:
+        "204": { description: Registered }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [Notifications]
+      summary: Remove a push token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, token]
+              properties:
+                provider: { type: string }
+                token: { type: string }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/search:
+    get:
+      tags: [Search]
+      summary: Search messages, chats, users and news
+      description: |
+        Results are restricted to what the caller can already see: the filter is
+        part of the query sent to the index, not applied to its results.
+
+        When the search cluster is unreachable this returns an empty result
+        rather than an error, so a search outage degrades the feature instead of
+        breaking the screen around it.
+      parameters:
+        - { in: query, name: q, required: true, schema: { type: string } }
+        - { in: query, name: type, schema: { type: string, enum: [all, messages, chats, users, news] } }
+        - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: The results, grouped by kind
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/reports:
+    post:
+      tags: [Moderation]
+      summary: Report a user, message, chat or story
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, reason]
+              properties:
+                target_type: { type: string, enum: [user, message, chat, story, news_article] }
+                target_id: { type: string, format: uuid }
+                reason: { type: string, enum: [spam, violence, child_abuse, illegal, personal_data, other] }
+                detail: { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: The report as filed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/admin/dashboard:
+    get:
+      tags: [Admin]
+      summary: Headline counts
+      description: Requires the `analytics.read` permission.
+      responses:
+        "200":
+          description: The dashboard figures
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/analytics/{metric}:
+    get:
+      tags: [Admin]
+      summary: One metric over time
+      parameters:
+        - { in: path, name: metric, required: true, schema: { type: string, enum: [users, messages, calls, media] } }
+        - { in: query, name: days, schema: { type: integer, default: 30, maximum: 365 } }
+      responses:
+        "200":
+          description: The series
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: Find users
+      description: |
+        Requires `users.read`, and every call is written to the audit log:
+        looking at an account is itself an action a reviewer may need to account
+        for.
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: The matching users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          users: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/users/{userID}/status:
+    put:
+      tags: [Admin]
+      summary: Suspend, restore or delete an account
+      parameters:
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, suspended, deleted] }
+                reason: { type: string }
+      responses:
+        "204": { description: Applied and recorded in the audit log }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/users/{userID}/roles:
+    post:
+      tags: [Admin]
+      summary: Grant a staff role
+      parameters:
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string }
+      responses:
+        "204": { description: Granted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/users/{userID}/roles/{roleKey}:
+    delete:
+      tags: [Admin]
+      summary: Revoke a staff role
+      parameters:
+        - { in: path, name: userID, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: roleKey, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/reports:
+    get:
+      tags: [Admin]
+      summary: The moderation queue
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [open, reviewing, resolved, dismissed] } }
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: The reports
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          reports: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/reports/{reportID}:
+    put:
+      tags: [Admin]
+      summary: Resolve a report
+      parameters:
+        - { in: path, name: reportID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [reviewing, resolved, dismissed] }
+                resolution: { type: string }
+      responses:
+        "204": { description: Resolved }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/bans:
+    get:
+      tags: [Admin]
+      summary: Active bans
+      responses:
+        "200":
+          description: The bans
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          bans: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Admin]
+      summary: Ban a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, reason]
+              properties:
+                user_id: { type: string, format: uuid }
+                reason: { type: string }
+                expires_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                  description: Null is permanent.
+      responses:
+        "201":
+          description: The ban
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/bans/{banID}:
+    delete:
+      tags: [Admin]
+      summary: Lift a ban
+      parameters:
+        - { in: path, name: banID, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Lifted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/feature-flags/{key}:
+    put:
+      tags: [Admin]
+      summary: Set a feature flag
+      parameters:
+        - { in: path, name: key, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                rollout_percentage: { type: integer, minimum: 0, maximum: 100 }
+                payload: { type: object, additionalProperties: true }
+      responses:
+        "204": { description: Set }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/audit-log:
+    get:
+      tags: [Admin]
+      summary: The audit log
+      description: |
+        Append-only. Nothing in the admin API can delete from it, including
+        this endpoint's own callers.
+      parameters:
+        - { in: query, name: actor_id, schema: { type: string, format: uuid } }
+        - { in: query, name: action, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 500 } }
+      responses:
+        "200":
+          description: The entries, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          entries: { type: array, items: { type: object, additionalProperties: true } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/admin/search/reindex/{index}:
+    post:
+      tags: [Admin]
+      summary: Rebuild a search index
+      description: Runs as a background job; the response says it was accepted, not that it has finished.
+      parameters:
+        - { in: path, name: index, required: true, schema: { type: string, enum: [messages, chats, users, news] } }
+      responses:
+        "202":
+          description: The rebuild was queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    botToken:
+      type: http
+      scheme: bearer
+      description: |
+        A bot token, presented as `Authorization: Bearer <token>`. The server
+        stores only its SHA-256 hash, so a token cannot be recovered from a
+        database dump and a lost one is replaced rather than looked up.
+
+  parameters:
+    ChatID:
+      name: chatID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BotID:
+      name: botID
+      in: path
+      required: true
+      description: The bot's user id — a bot is an ordinary user row.
+      schema: { type: string, format: uuid }
 
   responses:
     Unauthorized:
@@ -1253,3 +4304,367 @@ components:
         message_type: { type: integer }
         client_message_id: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
+
+    Profile:
+      type: object
+      description: |
+        A user as one viewer may see them. The privacy rules of §55 are applied
+        in the query that reads the row, so a field the viewer may not see is
+        absent rather than blank — there is no window in which the server holds
+        data it must remember to strip.
+      properties:
+        user_id: { type: string, format: uuid }
+        username: { type: string, nullable: true }
+        display_name: { type: string }
+        about:
+          type: string
+          description: |
+            Public. §55 lists no privacy key for the bio, and hiding it from
+            non-contacts would defeat its purpose: it is how someone decides
+            whether to make contact at all.
+        avatar_media_id: { type: string, format: uuid, nullable: true }
+        language: { type: string, enum: [fa, en, tr, ar] }
+        is_bot: { type: boolean }
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present only when the viewer is permitted to see it.
+        is_contact:
+          type: boolean
+          description: The viewer's relationship, not a setting of the subject's.
+        is_blocked: { type: boolean }
+
+    SelfProfile:
+      allOf:
+        - $ref: "#/components/schemas/Profile"
+        - type: object
+          description: The fields only the owner may see.
+          properties:
+            phone_number: { type: string }
+            birthday: { type: string, format: date-time, nullable: true }
+
+    ScheduledMessage:
+      type: object
+      description: |
+        A post queued for later. It is not a message: it has no sequence number
+        and appears in nobody's history until it publishes.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The queued post's id, not a message id.
+        chat_id: { type: string, format: uuid }
+        type: { type: string }
+        content: { type: string }
+        attachments:
+          type: array
+          items: { $ref: "#/components/schemas/Attachment" }
+        scheduled_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        attempts:
+          type: integer
+          description: How often publication has been tried. Five failures abandon the post.
+        last_error:
+          type: string
+          description: |
+            Why the last attempt failed, so the author can be told rather than
+            left wondering why nothing was sent.
+
+    Bot:
+      type: object
+      description: |
+        A bot is an ordinary user row carrying `is_bot`, so `user_id` is both
+        its identity as a bot and its identity as a chat participant.
+      properties:
+        user_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        username: { type: string, nullable: true }
+        display_name: { type: string }
+        description: { type: string }
+        about: { type: string }
+        can_join_groups: { type: boolean }
+        privacy_mode:
+          type: boolean
+          description: |
+            When on, the bot is sent only messages addressed to it. Enforced
+            where updates are selected, not where they are delivered.
+        inline_enabled: { type: boolean }
+        inline_placeholder: { type: string }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    IssuedToken:
+      type: object
+      description: |
+        A freshly issued token. `token` appears in this response and nowhere
+        else, ever: only its hash is stored.
+      properties:
+        id: { type: string, format: uuid }
+        token: { type: string }
+        prefix: { type: string }
+        label: { type: string }
+        created_at: { type: string, format: date-time }
+
+    BotToken:
+      type: object
+      description: A live token, listed without its secret.
+      properties:
+        id: { type: string, format: uuid }
+        prefix:
+          type: string
+          description: Enough to tell two tokens apart in a list, useless as a credential.
+        label: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+
+    BotCommand:
+      type: object
+      properties:
+        command:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+          description: Without the leading slash.
+        description: { type: string, maxLength: 256 }
+        position: { type: integer }
+        locale:
+          type: string
+          nullable: true
+          description: |
+            Null is the default list. A locale-specific entry overrides it for
+            users reading in that language.
+
+    BotWebhook:
+      type: object
+      description: The registration, never including the signing secret.
+      properties:
+        url: { type: string, format: uri }
+        max_connections: { type: integer }
+        allowed_updates:
+          type: array
+          items: { type: string }
+        last_error: { type: string }
+        last_delivery_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    BotUpdate:
+      type: object
+      properties:
+        update_id:
+          type: integer
+          format: int64
+          description: |
+            Monotonic per bot. Passing `offset = update_id + 1` confirms this
+            update and asks for the next.
+        type: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Shaped by `type`.
+
+    StickerSet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        title: { type: string }
+        kind: { type: string, enum: [static, animated, video] }
+        is_official: { type: boolean }
+        owner_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        is_added:
+          type: boolean
+          description: Whether the calling user has installed it.
+        stickers:
+          type: array
+          items: { $ref: "#/components/schemas/Sticker" }
+
+    Sticker:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        media_id: { type: string, format: uuid }
+        emoji: { type: string }
+        position:
+          type: integer
+          description: What the picker draws by; stable across reads.
+
+    LinkPreview:
+      type: object
+      description: |
+        An unfurled link. Every text field is bounded to 300 characters,
+        counted in characters rather than bytes, because the page it came from
+        is a stranger's.
+      properties:
+        url: { type: string, format: uri }
+        site_name: { type: string }
+        title: { type: string }
+        description: { type: string }
+        image_media_id: { type: string, format: uuid, nullable: true }
+
+    ChatSettings:
+      type: object
+      properties:
+        slow_mode_seconds: { type: integer }
+        approval_required:
+          type: boolean
+          description: New members join through a request rather than directly.
+        history_visible_to_new_members: { type: boolean }
+        default_permissions:
+          type: object
+          additionalProperties: { type: boolean }
+        sign_messages:
+          type: boolean
+          description: Channel posts carry the posting admin's name.
+
+    InviteLink:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string, description: The link's secret; possessing it is what grants entry. }
+        name: { type: string }
+        member_limit: { type: integer, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        used_count: { type: integer }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    JoinRequest:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        display_name: { type: string }
+        requested_at: { type: string, format: date-time }
+        via_link_id: { type: string, format: uuid, nullable: true }
+
+    Community:
+      type: object
+      description: A group of chats presented together, each of which is an ordinary chat.
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string }
+        username: { type: string, nullable: true }
+        is_public: { type: boolean }
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        rooms:
+          type: array
+          items:
+            type: object
+            properties:
+              chat_id: { type: string, format: uuid }
+              title: { type: string }
+              section: { type: string }
+              position: { type: integer }
+
+    Story:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        author_id: { type: string, format: uuid, nullable: true }
+        channel_chat_id: { type: string, format: uuid, nullable: true }
+        type: { type: string, enum: [photo, video, text] }
+        media_id: { type: string, format: uuid, nullable: true }
+        caption: { type: string }
+        background: { type: string }
+        privacy: { type: string, enum: [everyone, contacts, close_friends, selected] }
+        view_count: { type: integer }
+        seen_by_me: { type: boolean }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+
+    Poll:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        question: { type: string }
+        is_anonymous: { type: boolean }
+        allows_multiple: { type: boolean }
+        is_quiz: { type: boolean }
+        correct_option:
+          type: integer
+          nullable: true
+          description: Withheld until the caller has answered, so the quiz is still a quiz.
+        is_closed: { type: boolean }
+        closes_at: { type: string, format: date-time, nullable: true }
+        total_voters: { type: integer }
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              text: { type: string }
+              position: { type: integer }
+              vote_count: { type: integer }
+              chosen_by_me: { type: boolean }
+
+    Call:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        initiator_id: { type: string, format: uuid }
+        type: { type: string, enum: [audio, video, group_audio, group_video] }
+        status: { type: string, enum: [ringing, active, ended, missed, rejected] }
+        end_reason: { type: string }
+        started_at: { type: string, format: date-time }
+        answered_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id: { type: string, format: uuid }
+              is_muted: { type: boolean }
+              video_enabled: { type: boolean }
+              screen_sharing: { type: boolean }
+
+    NewsArticle:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        locale: { type: string, enum: [fa, en, tr, ar] }
+        title: { type: string }
+        subtitle: { type: string }
+        lead: { type: string }
+        body: { type: string }
+        body_format: { type: string, enum: [markdown, html] }
+        cover_media_id: { type: string, format: uuid, nullable: true }
+        video_media_id: { type: string, format: uuid, nullable: true }
+        audio_media_id: { type: string, format: uuid, nullable: true }
+        category_id: { type: string, format: uuid, nullable: true }
+        author_id: { type: string, format: uuid, nullable: true }
+        is_breaking: { type: boolean }
+        status: { type: string, enum: [draft, review, scheduled, published, archived] }
+        view_count: { type: integer }
+        ai_summary: { type: string }
+        ai_keywords: { type: array, items: { type: string } }
+        publish_at: { type: string, format: date-time, nullable: true }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    NewsArticleInput:
+      type: object
+      required: [slug, title]
+      properties:
+        slug: { type: string }
+        locale: { type: string, enum: [fa, en, tr, ar], default: fa }
+        title: { type: string }
+        subtitle: { type: string }
+        lead: { type: string }
+        body: { type: string }
+        body_format: { type: string, enum: [markdown, html], default: markdown }
+        cover_media_id: { type: string, format: uuid, nullable: true }
+        video_media_id: { type: string, format: uuid, nullable: true }
+        audio_media_id: { type: string, format: uuid, nullable: true }
+        category_id: { type: string, format: uuid, nullable: true }
+        author_id: { type: string, format: uuid, nullable: true }
+        is_breaking: { type: boolean, default: false }
+        tag_ids: { type: array, items: { type: string, format: uuid } }

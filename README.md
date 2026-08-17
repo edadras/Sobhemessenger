@@ -148,7 +148,7 @@ tests.
 
 | Area | What exists |
 |---|---|
-| **Database** | 74 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
+| **Database** | 88 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
 | **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
 | **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
@@ -165,7 +165,7 @@ tests.
 | **Admin** | RBAC-gated endpoints for users, reports, bans, flags, analytics and audit log; every mutation audited; bans revoke sessions immediately; Flutter Web panel with dashboard, users, reports, editorial queue and feature flags. |
 | **Background work** | Durable job consumers with backoff and poison-message handling, media processing, push delivery, search indexing, and maintenance (OTP expiry, event-log pruning, story expiry, abandoned uploads, scheduled publishing). |
 | **Infrastructure** | Docker Compose dev stack, distroless image, nginx edge config, Prometheus alerts derived from the §79 targets, Grafana provisioning, Kubernetes manifests with PDB/HPA/NetworkPolicy and backup CronJobs, encrypted backup and verified restore scripts, CI with lint, tests, reversible-migration check and image scanning. |
-| **Protocol** | OpenAPI 3.1 for the implemented surface and a full WebSocket protocol document. |
+| **Protocol** | OpenAPI 3.1 covering every served endpoint, and a full WebSocket protocol document. A test walks the real router in both directions, so an undocumented route and a documented route that does not exist both fail the build. |
 | **Contacts** | Discovery by HMAC digest under a server-published pepper — a phone number never leaves the device — with full and incremental sync, favourites, blocking in both directions, and privacy resolved per viewer in SQL. |
 | **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. |
 | **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats with media, voice notes and polls; contacts; groups and channels with member administration, invite links and join requests; stories with a composer and viewer; WebRTC calls; communities; the news feed with articles and bookmarks; search; notifications; profile and settings. |
@@ -195,29 +195,66 @@ Both assert rather than report: the suite fails the build on a regression, and
 k6 exits 99 when a threshold is crossed — verified by running it against a
 deliberately impossible target and confirming it fails.
 
-### Not yet built
+### The bot platform
 
-**No bot platform.** There is no BotFather equivalent, no bot token issuance,
-no bot API, no webhooks and no inline queries. `users.is_bot` exists as a
-column and the admin panel displays it, but nothing writes it: an account
-cannot currently be created as a bot, and third parties cannot add bots to the
-platform. This is a whole subsystem, not a missing endpoint.
+Anyone with an account can register a bot, which is the BotFather equivalent —
+offered as an ordinary API rather than as a conversation with another bot.
 
-**Schema exists, behaviour does not.** These were modelled in the database so
-that adding them later needs no migration, but they have no endpoint and no
-UI. The columns are inert today:
+A bot **is** a user row carrying `is_bot`. That is the whole design: every
+membership, permission, delivery and sync path already written works on a bot
+unchanged, so there is no parallel implementation that can drift from the one
+people actually use.
 
-| Feature | What exists | What is missing |
-|---|---|---|
-| Forwarding | `forward_from_*` columns, rendered in responses | The forward endpoint |
-| Scheduled messages | `scheduled_at` column and partial index | Scheduling and the publisher |
-| Pinned messages | `is_pinned`, `SetPinned` in the repository, the `pin_messages` permission | The HTTP route |
-| Stickers and GIFs | Media kinds, message types, `send_stickers` permission, `sticker_set` on groups | Sticker set management and a picker |
-| Location and contact messages | Both in the message-type constraint | Composing and rendering them |
-| Usernames | Unique index, the column, search by it | Claiming and changing one |
-| Profile editing | `user_profiles` with every field | The endpoint — the app shows the device name because of this |
-| Archived and pinned chats | `is_archived`, `is_pinned` on `chat_members` | The endpoints |
-| Link previews | The `embed_links` permission | Unfurling |
+Four decisions worth stating, because each differs from the obvious choice:
+
+- **The token goes in the `Authorization` header, not the URL.** Telegram puts
+  it in the path, which is convenient and also writes the credential into every
+  access log, proxy trace and browser history along the way. A header costs the
+  bot author nothing and does not.
+- **Only a SHA-256 hash is stored.** A token is shown once, at issue. A lost
+  one is replaced rather than recovered, and a database dump yields nothing
+  usable. Five may be live at once so a rotation is not an outage.
+- **Privacy mode is enforced where updates are selected, not where they are
+  delivered.** The bot is never handed a message it is not entitled to see and
+  then trusted to discard it.
+- **Updates are a durable queue, not a fan-out buffer.** A bot confirms what it
+  has processed by asking for the next offset, so one that restarts mid-batch
+  resumes rather than losing the batch. The backlog is bounded per bot, so an
+  abandoned bot loses its oldest updates instead of filling the table.
+
+Webhooks are validated through the same SSRF guard as link unfurling — https
+only, public addresses only, checked in the dialer rather than before it — and
+every delivery is signed with a per-registration HMAC-SHA256 secret.
+
+### Closed since the last release
+
+Each of these had a schema and nothing else. All are now served, tested against
+real PostgreSQL, and documented in `protocol/rest/openapi.yaml`:
+
+| Feature | What it does now |
+|---|---|
+| Forwarding | Attribution survives a chain, and the source chat's membership is joined into the read so a guessable message id leaks nothing |
+| Scheduled messages | Queued in their own table, published through the ordinary send path, exactly-once by idempotency key |
+| Pinned messages | Route, permission check and a chat-wide event |
+| Stickers | Sets, per-user installation with ordering, search by title, slug or emoji |
+| Usernames | Claiming, with a 30-day hold on a released name so it cannot be squatted |
+| Profile editing | Partial updates with rune-counted limits |
+| Archived and muted chats | Per member, so archiving a group does not archive it for everyone |
+| Link previews | OpenGraph unfurling behind the SSRF guard, with a shared cache that also caches failures |
+
+Scheduling turned out to be the interesting one. Migration 0004 had reserved
+`messages.scheduled_at`, but `messages.seq` is `NOT NULL` and a seq-less row
+would sort to the top of `ORDER BY seq DESC` — an unsent draft at the head of
+every member's history. Migration 0011 gives a queued post its own table, so a
+row in `messages` keeps meaning "in the conversation".
+
+### Still not built
+
+**Location and contact messages.** Both are in the message-type constraint;
+neither can be composed or rendered.
+
+**Inline queries.** Bots can be messaged and can reply; they cannot yet be
+invoked inline from another chat's compose box.
 
 **Secret chats on the device (§24).** The server half is complete. X3DH and
 the Double Ratchet belong on the device and will use a reviewed implementation
@@ -234,7 +271,7 @@ a single process: it bounds latency, not capacity.
 | Document | Contents |
 |---|---|
 | `docs/protocol/websocket.md` | Frame format, events, sync, reconnection, scaling |
-| `protocol/rest/openapi.yaml` | REST contract for the implemented surface |
+| `protocol/rest/openapi.yaml` | REST contract: all 138 endpoints, kept in step with the router by a test |
 | `docs/architecture/` | System design, database model, sync model, roadmap |
 | `docs/security/` | Threat model and security controls |
 | `docs/deployment/` | Deployment, backup and disaster recovery |
