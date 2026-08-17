@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,13 +22,20 @@ import '../../media/presentation/media_widgets.dart';
 import '../../polls/presentation/poll_widgets.dart';
 import '../../stickers/presentation/sticker_picker.dart';
 import '../data/chat_repository.dart';
+import '../data/inbound_sync.dart';
 import '../data/organise_repository.dart';
+import 'location_sheet.dart';
 import 'message_actions.dart';
+import 'message_content.dart';
 import 'scheduled_messages_screen.dart';
 
 /// What the chat's overflow menu offers beyond the actions with their own
 /// buttons.
 enum _ChatAction { scheduled, mute, unmute, archive }
+
+/// What the paperclip offers. One menu rather than three buttons, because
+/// three would crowd the composer on a narrow screen.
+enum _Attachment { media, location, contact }
 
 /// A single conversation (§49).
 class ChatScreen extends ConsumerStatefulWidget {
@@ -46,6 +54,62 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// Non-null while an attachment is uploading, so the composer can show how
   /// far it has got instead of a spinner of unknown length.
   UploadProgress? _uploading;
+
+  /// True while a backfill is in flight, so scrolling does not start a second.
+  bool _loadingHistory = false;
+
+  /// False once the server has no more history to give, so an empty chat does
+  /// not ask for the same nothing on every scroll.
+  bool _moreHistory = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // The local database is what the screen draws, so history is fetched into
+    // it rather than into the widget. An offline open shows what is cached and
+    // silently fills in when the network returns.
+    unawaited(_loadHistory());
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    // The list is reversed, so the far edge is the oldest message.
+    if (_scrollController.position.extentAfter < 400) {
+      unawaited(_loadHistory());
+    }
+  }
+
+  Future<void> _loadHistory() async {
+    if (_loadingHistory || !_moreHistory) {
+      return;
+    }
+    _loadingHistory = true;
+
+    try {
+      final List<MessageRow> known = await ref
+          .read(chatRepositoryProvider)
+          .watchMessages(widget.chatId)
+          .first;
+      final int? oldest =
+          known.map((MessageRow row) => row.seq).whereType<int>().fold<int?>(
+                null,
+                (int? lowest, int seq) =>
+                    lowest == null || seq < lowest ? seq : lowest,
+              );
+
+      final int fetched = await ref
+          .read(inboundSyncProvider)
+          .loadHistory(widget.chatId, beforeSeq: oldest);
+      if (fetched == 0) {
+        _moreHistory = false;
+      }
+    } on ApiException {
+      // Offline is the ordinary case here, and the cached history is already
+      // on screen; the next scroll or reconnection tries again.
+    } finally {
+      _loadingHistory = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -217,6 +281,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  /// Shares a point on the map, once or as a live position.
+  Future<void> _sendLocation() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SharedLocation? location = await showLocationSheet(context);
+    if (location == null || !mounted) {
+      return;
+    }
+
+    try {
+      await ref.read(chatRepositoryProvider).sendTyped(
+            chatId: widget.chatId,
+            type: 'location',
+            payload: location.toPayload(),
+          );
+    } on ApiException catch (error) {
+      _tell(error.isOffline ? l10n.errorNetwork : error.message);
+    }
+  }
+
+  /// Shares one contact's name and number — not their whole address-book entry.
+  Future<void> _sendContact() async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SharedContact? contact = await pickContactToShare(context);
+    if (contact == null || !mounted) {
+      return;
+    }
+
+    try {
+      await ref.read(chatRepositoryProvider).sendTyped(
+            chatId: widget.chatId,
+            type: 'contact',
+            payload: contact.toPayload(),
+          );
+    } on ApiException catch (error) {
+      _tell(error.isOffline ? l10n.errorNetwork : error.message);
+    }
+  }
+
   /// Places a call and opens the in-call screen.
   Future<void> _startCall({required bool video}) async {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -354,6 +456,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             onSend: _send,
             onAttach: _attach,
             onSticker: _sendSticker,
+            onLocation: _sendLocation,
+            onContact: _sendContact,
             onVoice: _sendVoice,
             hint: l10n.chatMessageHint,
           ),
@@ -463,6 +567,18 @@ class _MessageBubble extends StatelessWidget {
                     caption: attachment.caption,
                   ),
                 ),
+              // A location and a contact are structured, so they are drawn
+              // rather than printed. A deleted message shows its tombstone
+              // instead: whatever it carried is gone.
+              if (!isDeleted &&
+                  message.type == 'location' &&
+                  message.payloadJson != null)
+                LocationBubble(payloadJson: message.payloadJson!),
+              if (!isDeleted &&
+                  message.type == 'contact' &&
+                  message.payloadJson != null)
+                ContactBubble(payloadJson: message.payloadJson!),
+
               if (isDeleted || message.content.isNotEmpty)
                 Text(
                   isDeleted ? l10n.chatMessageDeleted : message.content,
@@ -473,6 +589,15 @@ class _MessageBubble extends StatelessWidget {
                     fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
                   ),
                 ),
+
+              // Buttons a bot attached. They go under the text, and disappear
+              // with the message if it is deleted.
+              if (!isDeleted && message.replyMarkupJson != null)
+                InlineKeyboardView(
+                  message: message,
+                  markupJson: message.replyMarkupJson!,
+                ),
+
               const SizedBox(height: SobhSpacing.xxs),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -521,6 +646,8 @@ class _Composer extends StatefulWidget {
     required this.onSend,
     required this.onAttach,
     required this.onSticker,
+    required this.onLocation,
+    required this.onContact,
     required this.onVoice,
     required this.hint,
   });
@@ -529,6 +656,8 @@ class _Composer extends StatefulWidget {
   final Future<void> Function() onSend;
   final Future<void> Function() onAttach;
   final Future<void> Function() onSticker;
+  final Future<void> Function() onLocation;
+  final Future<void> Function() onContact;
   final Future<void> Function(File recording, Duration length) onVoice;
   final String hint;
 
@@ -620,10 +749,43 @@ class _ComposerState extends State<_Composer> {
               )
             : Row(
                 children: <Widget>[
-                  IconButton(
-                    onPressed: widget.onAttach,
+                  PopupMenuButton<_Attachment>(
                     icon: const Icon(Icons.attach_file),
                     tooltip: l10n.mediaAttach,
+                    onSelected: (_Attachment choice) {
+                      switch (choice) {
+                        case _Attachment.media:
+                          unawaited(widget.onAttach());
+                        case _Attachment.location:
+                          unawaited(widget.onLocation());
+                        case _Attachment.contact:
+                          unawaited(widget.onContact());
+                      }
+                    },
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<_Attachment>>[
+                      PopupMenuItem<_Attachment>(
+                        value: _Attachment.media,
+                        child: ListTile(
+                          leading: const Icon(Icons.image_outlined),
+                          title: Text(l10n.mediaAttach),
+                        ),
+                      ),
+                      PopupMenuItem<_Attachment>(
+                        value: _Attachment.location,
+                        child: ListTile(
+                          leading: const Icon(Icons.location_on_outlined),
+                          title: Text(l10n.locationShare),
+                        ),
+                      ),
+                      PopupMenuItem<_Attachment>(
+                        value: _Attachment.contact,
+                        child: ListTile(
+                          leading: const Icon(Icons.person_outline),
+                          title: Text(l10n.contactShare),
+                        ),
+                      ),
+                    ],
                   ),
                   IconButton(
                     onPressed: widget.onSticker,

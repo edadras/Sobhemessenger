@@ -62,6 +62,12 @@ class Messages extends Table {
   TextColumn get replyToId => text().nullable()();
   TextColumn get attachmentsJson => text().nullable()();
   TextColumn get reactionsJson => text().nullable()();
+
+  /// The inline keyboard a bot attached, as the server sent it. Kept whole
+  /// rather than parsed into columns: it is a bot's structure, and the app's
+  /// job is to draw it, not to have an opinion about it.
+  TextColumn get replyMarkupJson => text().nullable()();
+
   IntColumn get status => intEnum<MessageStatus>()();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
@@ -152,7 +158,7 @@ class LocalDatabase extends _$LocalDatabase {
   LocalDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -161,6 +167,15 @@ class LocalDatabase extends _$LocalDatabase {
           await into(syncState).insert(
             SyncStateCompanion.insert(id: const Value<int>(1)),
           );
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          // 2: inline keyboards. Existing rows simply have none, so the column
+          // is added rather than the cache being thrown away — a rebuild would
+          // cost every user their offline history for a feature they may never
+          // meet.
+          if (from < 2) {
+            await m.addColumn(messages, messages.replyMarkupJson);
+          }
         },
         beforeOpen: (OpeningDetails details) async {
           // Cascades depend on foreign keys, which SQLite leaves off by default.
@@ -200,6 +215,49 @@ class LocalDatabase extends _$LocalDatabase {
   /// optimistic copy, which is why this is a full upsert on the idempotency key.
   Future<void> upsertMessage(MessagesCompanion message) {
     return into(messages).insertOnConflictUpdate(message);
+  }
+
+  /// Marks a message deleted, keeping the row.
+  ///
+  /// A tombstone rather than a delete: the message stays in its place in the
+  /// conversation showing that something was removed, which is what the server
+  /// does too — a gap in the sequence would be worse than a marker.
+  Future<void> markMessageDeleted(String messageId) {
+    return (update(messages)
+          ..where(($MessagesTable t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(deletedAt: Value<DateTime>(DateTime.now())));
+  }
+
+  Future<void> markMessagePinned(String messageId, bool pinned) {
+    return (update(messages)
+          ..where(($MessagesTable t) => t.id.equals(messageId)))
+        .write(MessagesCompanion(isPinned: Value<bool>(pinned)));
+  }
+
+  /// Where this device has got to in the per-user event log.
+  Future<int> syncCursor() async {
+    final SyncStateRow? state = await (select(syncState)
+          ..where(($SyncStateTable t) => t.id.equals(1)))
+        .getSingleOrNull();
+    return state?.cursor ?? 0;
+  }
+
+  /// Moves the cursor forward, never back.
+  ///
+  /// An out-of-order frame carrying an older sequence must not rewind it, or
+  /// the next catch-up would replay everything in between.
+  Future<void> advanceSyncCursor(int cursor) async {
+    await (update(syncState)
+          ..where(
+            ($SyncStateTable t) =>
+                t.id.equals(1) & t.cursor.isSmallerThanValue(cursor),
+          ))
+        .write(
+      SyncStateCompanion(
+        cursor: Value<int>(cursor),
+        lastSyncedAt: Value<DateTime>(DateTime.now()),
+      ),
+    );
   }
 
   Future<void> markMessageStatus(String clientMessageId, MessageStatus status) {

@@ -385,5 +385,38 @@
         "type": "String"
       }
     }
+  },
+  "locationShare": "موقعیت مکانی",
+  "contactShare": "مخاطب",
+  "locationShared": "موقعیت به اشتراک گذاشته شد",
+  "locationSendCurrent": "فرستادن موقعیت فعلی من",
+  "locationLiveExplain": "یا برای مدتی آن را به‌روز نگه دارید. هر وقت خواستید می‌توانید متوقفش کنید.",
+  "locationLive15Minutes": "به مدت ۱۵ دقیقه",
+  "locationLive1Hour": "به مدت ۱ ساعت",
+  "locationLive8Hours": "به مدت ۸ ساعت",
+  "locationLiveEnded": "اشتراک زندهٔ موقعیت پایان یافت",
+  "locationStop": "توقف اشتراک‌گذاری",
+  "locationServiceOff": "موقعیت‌یابی روی این دستگاه خاموش است.",
+  "locationPermissionDenied": "اجازهٔ استفاده از موقعیت شما داده نشد.",
+  "locationPermissionPermanent": "اجازهٔ موقعیت مسدود شده است. می‌توانید آن را در تنظیمات دستگاه روشن کنید.",
+  "locationUnavailable": "موقعیت شما پیدا نشد.",
+  "messageUnsupported": "این پیام در این نسخه نمایش داده نمی‌شود.",
+  "inlineSearching": "در حال جست‌وجو…",
+  "inlineNoResults": "این ربات چیزی پیدا نکرد",
+  "locationAccuracy": "با دقت حدود {metres} متر",
+  "@locationAccuracy": {
+    "placeholders": {
+      "metres": {
+        "type": "int"
+      }
+    }
+  },
+  "locationLiveUntil": "زنده تا {time}",
+  "@locationLiveUntil": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
   }
 }

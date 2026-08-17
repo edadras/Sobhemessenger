@@ -90,12 +90,31 @@ class ChatRepository {
         ],
       );
 
+  /// Queues a message carrying a typed payload — a location or a contact.
+  ///
+  /// The payload goes through the outbox like anything else, so sharing a
+  /// location with no signal queues it rather than failing.
+  Future<String> sendTyped({
+    required String chatId,
+    required String type,
+    required Map<String, dynamic> payload,
+    String? replyToId,
+  }) =>
+      _send(
+        chatId: chatId,
+        type: type,
+        content: '',
+        replyToId: replyToId,
+        typedPayload: payload,
+      );
+
   Future<String> _send({
     required String chatId,
     required String type,
     required String content,
     String? replyToId,
     List<Map<String, dynamic>> attachments = const <Map<String, dynamic>>[],
+    Map<String, dynamic>? typedPayload,
   }) async {
     final String clientMessageId = _uuid.v4();
     final DateTime now = DateTime.now().toUtc();
@@ -107,6 +126,7 @@ class ChatRepository {
       'content': content,
       if (replyToId != null) 'reply_to_id': replyToId,
       if (attachments.isNotEmpty) 'attachments': attachments,
+      if (typedPayload != null) 'payload': typedPayload,
     };
 
     await _db.transaction(() async {
@@ -121,6 +141,9 @@ class ChatRepository {
           replyToId: Value<String?>(replyToId),
           attachmentsJson: Value<String?>(
             attachments.isEmpty ? null : jsonEncode(attachments),
+          ),
+          payloadJson: Value<String?>(
+            typedPayload == null ? null : jsonEncode(typedPayload),
           ),
           status: MessageStatus.pending,
           createdAt: now,

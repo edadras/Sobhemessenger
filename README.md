@@ -148,7 +148,7 @@ tests.
 
 | Area | What exists |
 |---|---|
-| **Database** | 88 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
+| **Database** | 91 tables covering every domain in the specification. Up **and** down migrations, verified by applying and reverting against a live PostgreSQL. |
 | **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
 | **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
@@ -203,8 +203,17 @@ deliberately impossible target and confirming it fails.
 
 ### The bot platform
 
-Anyone with an account can register a bot, which is the BotFather equivalent —
-offered as an ordinary API rather than as a conversation with another bot.
+**@sobhfather_bot** is a real bot you message, exactly as in Telegram. It asks
+what to call your bot, asks for a handle, and hands you the token:
+`/newbot` `/mybots` `/token` `/revoke` `/setname` `/setdescription` `/setabout`
+`/setcommands` `/setprivacy` `/setinline` `/setjoingroups` `/deletebot`
+`/cancel` `/help`. Registering is also an ordinary API, for anyone who would
+rather script it.
+
+BotFather runs inside the server rather than as a program holding a token,
+because a BotFather token would create bots for anyone and read every bot its
+caller owns. The database refuses to issue one, with a trigger rather than a
+convention.
 
 A bot **is** a user row carrying `is_bot`. That is the whole design: every
 membership, permission, delivery and sync path already written works on a bot
@@ -232,6 +241,15 @@ Webhooks are validated through the same SSRF guard as link unfurling — https
 only, public addresses only, checked in the dialer rather than before it — and
 every delivery is signed with a per-registration HMAC-SHA256 secret.
 
+Bots are interfaces, not just correspondents: **inline keyboards** under a
+message, **callback queries** when one is tapped, and **inline mode** — typing
+`@somebot pizza` in any chat asks that bot for results without adding it there.
+A tap must name a button that is really on that message and come from someone
+in the chat, so a bot switching on `data` cannot be driven by a stranger. In
+inline mode the bot is told the query and who asked, and deliberately not where
+they are typing; nothing is sent until the person picks a result, and the
+message is then sent by them, through the ordinary send path.
+
 ### Closed since the last release
 
 Each of these had a schema and nothing else. All are now served, tested against
@@ -247,6 +265,10 @@ real PostgreSQL, and documented in `protocol/rest/openapi.yaml`:
 | Profile editing | Partial updates with rune-counted limits |
 | Archived and muted chats | Per member, so archiving a group does not archive it for everyone |
 | Link previews | OpenGraph unfurling behind the SSRF guard, with a shared cache that also caches failures |
+| Location messages | Fixed points, venues, and live location that updates the message rather than posting a movement log |
+| Contact messages | Name and one number, picked from the address book — not the whole record |
+| Inline keyboards | Buttons under a bot's message, and the taps they produce |
+| Inline mode | `@bot query` from any chat's compose box, without the bot joining it |
 
 Scheduling turned out to be the interesting one. Migration 0004 had reserved
 `messages.scheduled_at`, but `messages.seq` is `NOT NULL` and a seq-less row
@@ -255,12 +277,6 @@ every member's history. Migration 0011 gives a queued post its own table, so a
 row in `messages` keeps meaning "in the conversation".
 
 ### Still not built
-
-**Location and contact messages.** Both are in the message-type constraint;
-neither can be composed or rendered.
-
-**Inline queries.** Bots can be messaged and can reply; they cannot yet be
-invoked inline from another chat's compose box.
 
 **Secret chats on the device (§24).** The server half is complete. X3DH and
 the Double Ratchet belong on the device and will use a reviewed implementation

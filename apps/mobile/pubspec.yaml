@@ -50,6 +50,13 @@ dependencies:
   just_audio: ^0.9.46
   record: ^5.2.1
 
+  # Location messages (§12). geolocator asks the platform for a fix; the app
+  # never embeds a map — opening the coordinates in whatever map application
+  # the device has avoids shipping a tile provider's SDK and telling it where
+  # every user is.
+  geolocator: ^13.0.2
+  url_launcher: ^6.3.1
+
   # Calls (§18)
   flutter_webrtc: ^0.12.5
 
