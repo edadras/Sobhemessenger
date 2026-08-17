@@ -12,6 +12,7 @@ import (
 	"github.com/sobh/messenger/backend/internal/bots"
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/database"
+	"github.com/sobh/messenger/backend/internal/messaging"
 )
 
 func testDB(t *testing.T) *database.DB {
@@ -290,7 +291,7 @@ func TestPrivacyModeFiltersWhichBotsAreNotified(t *testing.T) {
 	chatID := createGroupWith(t, db, owner, private.UserID, open.UserID)
 
 	// An ordinary message reaches only the bot without privacy mode.
-	notified, err := repo.SubscribedBots(ctx, chatID, false, nil)
+	notified, err := repo.SubscribedBots(ctx, chatID, false, nil, nil)
 	if err != nil {
 		t.Fatalf("SubscribedBots: %v", err)
 	}
@@ -300,7 +301,7 @@ func TestPrivacyModeFiltersWhichBotsAreNotified(t *testing.T) {
 	}
 
 	// A command reaches both: privacy mode never hides commands.
-	notified, err = repo.SubscribedBots(ctx, chatID, true, nil)
+	notified, err = repo.SubscribedBots(ctx, chatID, true, nil, nil)
 	if err != nil {
 		t.Fatalf("SubscribedBots (command): %v", err)
 	}
@@ -309,7 +310,7 @@ func TestPrivacyModeFiltersWhichBotsAreNotified(t *testing.T) {
 	}
 
 	// A reply addressed to the private bot reaches it even without a command.
-	notified, err = repo.SubscribedBots(ctx, chatID, false, &private.UserID)
+	notified, err = repo.SubscribedBots(ctx, chatID, false, &private.UserID, nil)
 	if err != nil {
 		t.Fatalf("SubscribedBots (reply): %v", err)
 	}
@@ -381,4 +382,45 @@ func createGroupWith(t *testing.T, db *database.DB, owner uuid.UUID, members ...
 		}
 	}
 	return chatID
+}
+
+// Privacy mode is a group concept. In a one-to-one chat every message is
+// addressed to the bot by the act of being sent there, so applying the filter
+// would leave a bot that can only be talked to in commands — which is not a
+// messenger. This is the rule BotFather depends on, and every other bot too.
+func TestPrivacyModeDoesNotApplyInAPrivateChat(t *testing.T) {
+	db := testDB(t)
+	repo := bots.NewRepository(db)
+	ctx := context.Background()
+
+	owner := createUser(t, db)
+	bot, _ := registerBot(t, repo, owner)
+
+	var privacy bool
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT privacy_mode FROM bots WHERE user_id = $1`, bot.UserID).Scan(&privacy); err != nil {
+		t.Fatalf("read privacy mode: %v", err)
+	}
+	if !privacy {
+		t.Fatal("test premise is wrong: a new bot should have privacy mode on")
+	}
+
+	messagingRepo := messaging.NewRepository(db)
+	chatID, _, err := messagingRepo.EnsurePrivateChat(ctx, owner, bot.UserID)
+	if err != nil {
+		t.Fatalf("EnsurePrivateChat: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM chats WHERE id = $1`, chatID)
+	})
+
+	// Not a command, not a reply, not a mention — and it must still arrive.
+	notified, err := repo.SubscribedBots(ctx, chatID, false, nil, nil)
+	if err != nil {
+		t.Fatalf("SubscribedBots: %v", err)
+	}
+	if len(notified) != 1 || notified[0] != bot.UserID {
+		t.Fatalf("a plain message in a private chat notified %v, want the bot %s",
+			notified, bot.UserID)
+	}
 }

@@ -184,7 +184,24 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	usersService := users.NewService(users.NewRepository(db))
 	// Bots post through the messaging service, so they are bound by the same
 	// membership, permission and rate-limit rules as anyone else.
-	botsService := bots.NewService(bots.NewRepository(db), messagingService, logger)
+	botsRepo := bots.NewRepository(db)
+	botsService := bots.NewService(botsRepo, messagingService, logger)
+
+	// Bots hear about messages through an observer rather than by messaging
+	// importing them, which would be a cycle: bots already depends on messaging
+	// to send. Without this a bot could talk and never listen.
+	messagingService.AddObserver(botsService)
+
+	// BotFather runs inside the server. It can create a bot for any user, so a
+	// token for it would be a credential nobody should hold — the database
+	// refuses to issue one.
+	botFatherID, err := botsService.EnsureBotFather(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("assemble: provision botfather: %w", err)
+	}
+	botsService.RegisterInternal(botFatherID,
+		bots.NewBotFather(botsRepo, botsService, db, botFatherID, logger))
+
 	stickersService := stickers.NewService(stickers.NewRepository(db))
 
 	contactsService := contacts.NewService(contacts.NewRepository(db), limiter, rules, cfg.Auth)

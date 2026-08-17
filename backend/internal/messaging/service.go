@@ -29,6 +29,16 @@ const (
 
 // Service applies the messaging rules — permissions, slow mode, edit windows,
 // rate limits — on top of the repository.
+// MessageObserver is told about a message once it has been delivered.
+//
+// It exists so the bot platform can see traffic without messaging importing
+// it: bots already depends on messaging to send, and a dependency the other
+// way would be a cycle. An observer is told after delivery and its failures
+// are its own — nothing it does can fail the send that triggered it.
+type MessageObserver interface {
+	ObserveMessage(ctx context.Context, chatCtx *ChatContext, message *Message)
+}
+
 type Service struct {
 	repo    *Repository
 	bus     *bus.Bus
@@ -36,6 +46,16 @@ type Service struct {
 	rules   ratelimit.Rules
 	metrics *observability.Metrics
 	logger  *slog.Logger
+
+	// observers is written once during assembly and only read afterwards, so
+	// it needs no lock.
+	observers []MessageObserver
+}
+
+// AddObserver registers an observer. Called during assembly, before the server
+// accepts a request.
+func (s *Service) AddObserver(observer MessageObserver) {
+	s.observers = append(s.observers, observer)
 }
 
 func NewService(repo *Repository, messageBus *bus.Bus, limiter *ratelimit.Limiter, rules ratelimit.Rules, metrics *observability.Metrics, logger *slog.Logger) *Service {
@@ -137,9 +157,31 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		"message": result.Message,
 	})
 
+	s.notifyObservers(ctx, chatCtx, result.Message)
+
 	s.metrics.MessagesSent.WithLabelValues(chatCtx.ChatType, in.Type).Inc()
 	s.metrics.MessageSendLatency.Observe(time.Since(start).Seconds())
 	return result.Message, nil
+}
+
+// notifyObservers tells each observer about a delivered message.
+//
+// A panic in an observer is contained here. A bot platform fault must not turn
+// into a failed send for the person who wrote the message — they have already
+// been told it went.
+func (s *Service) notifyObservers(ctx context.Context, chatCtx *ChatContext, message *Message) {
+	for _, observer := range s.observers {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					s.logger.Error("a message observer panicked",
+						slog.Any("panic", recovered),
+						slog.String("message_id", message.ID.String()))
+				}
+			}()
+			observer.ObserveMessage(ctx, chatCtx, message)
+		}()
+	}
 }
 
 func (s *Service) validateSend(in *SendInput) error {

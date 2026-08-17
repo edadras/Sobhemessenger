@@ -105,6 +105,20 @@ type Webhook struct {
 	FailureCount   int        `json:"failure_count"`
 }
 
+// The update kinds a bot can be sent, matching the column's CHECK.
+//
+// These are Telegram's names on purpose: a bot author moving a bot across
+// already has code that switches on them. A command is not among them because
+// a command is a message that starts with a slash, there as well as here.
+const (
+	UpdateMessage       = "message"
+	UpdateEditedMessage = "edited_message"
+	UpdateCallbackQuery = "callback_query"
+	UpdateInlineQuery   = "inline_query"
+	UpdateChatMember    = "chat_member"
+	UpdateMyChatMember  = "my_chat_member"
+)
+
 // Update is one thing that happened, addressed to a bot.
 type Update struct {
 	ID      int64           `json:"update_id"`
@@ -325,6 +339,9 @@ func (r *Repository) ListForOwner(ctx context.Context, ownerID uuid.UUID) ([]Bot
 
 // Settings are the fields an owner may change after registration.
 type Settings struct {
+	// DisplayName lives in user_profiles rather than in bots, because a bot is
+	// a user and that is where a user's name is kept.
+	DisplayName       *string
 	Description       *string
 	About             *string
 	CanJoinGroups     *bool
@@ -335,6 +352,17 @@ type Settings struct {
 }
 
 func (r *Repository) UpdateSettings(ctx context.Context, botID uuid.UUID, in Settings) error {
+	if in.DisplayName != nil {
+		if _, err := r.db.Pool.Exec(ctx, `
+			INSERT INTO user_profiles (user_id, display_name)
+			VALUES ($1, $2)
+			ON CONFLICT (user_id) DO UPDATE
+			SET display_name = EXCLUDED.display_name, updated_at = now()`,
+			botID, *in.DisplayName); err != nil {
+			return fmt.Errorf("bots: update display name: %w", err)
+		}
+	}
+
 	tag, err := r.db.Pool.Exec(ctx, `
 		UPDATE bots SET
 			description        = COALESCE($2, description),
@@ -666,19 +694,139 @@ func (r *Repository) MarkDelivered(ctx context.Context, botID uuid.UUID, ids []i
 // SubscribedBots lists the bots in a chat that should receive an update.
 //
 // Privacy mode is applied here rather than at delivery: a bot with privacy on
-// sees only commands and replies to itself, so filtering at the source means
-// the rest never reaches its queue at all.
-func (r *Repository) SubscribedBots(ctx context.Context, chatID uuid.UUID, isCommand bool, replyToBot *uuid.UUID) ([]uuid.UUID, error) {
+// sees only commands, replies to itself and messages that name it, so
+// filtering at the source means the rest never reaches its queue at all.
+//
+// It does not apply in a one-to-one chat. Privacy mode answers "should this
+// bot see other people's conversation?", and in a private chat there is no
+// other conversation — every message is addressed to the bot by the act of
+// being sent there. Applying it anyway would mean a bot could only be talked
+// to in commands, which is not a messenger.
+func (r *Repository) SubscribedBots(
+	ctx context.Context,
+	chatID uuid.UUID,
+	isCommand bool,
+	replyToBot *uuid.UUID,
+	mentioned []uuid.UUID,
+) ([]uuid.UUID, error) {
+	if mentioned == nil {
+		mentioned = []uuid.UUID{}
+	}
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT b.user_id
 		  FROM chat_members cm
 		  JOIN bots b ON b.user_id = cm.user_id AND b.is_active
+		  JOIN chats c ON c.id = cm.chat_id AND c.deleted_at IS NULL
 		 WHERE cm.chat_id = $1
 		   AND cm.left_at IS NULL
-		   AND (NOT b.privacy_mode OR $2 OR b.user_id = $3)`,
-		chatID, isCommand, replyToBot)
+		   AND (c.type = 'private'
+		        OR NOT b.privacy_mode
+		        OR $2
+		        OR b.user_id = $3
+		        OR b.user_id = ANY($4::uuid[]))`,
+		chatID, isCommand, replyToBot, mentioned)
 	if err != nil {
 		return nil, fmt.Errorf("bots: list subscribed: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// RevokeAllTokens retires every token a bot holds.
+//
+// This is what "my token leaked" needs: revoking one and leaving the rest live
+// would not answer the request.
+func (r *Repository) RevokeAllTokens(ctx context.Context, botID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE bot_tokens SET revoked_at = now()
+		  WHERE bot_id = $1 AND revoked_at IS NULL`, botID)
+	if err != nil {
+		return fmt.Errorf("bots: revoke all tokens: %w", err)
+	}
+	return nil
+}
+
+// IsPrivateChat answers whether a chat is one-to-one.
+//
+// BotFather refuses to work anywhere else: in a group its replies would hand
+// one member's token to everyone in the room.
+func (r *Repository) IsPrivateChat(ctx context.Context, chatID uuid.UUID) (bool, error) {
+	var chatType string
+	err := r.db.Pool.QueryRow(ctx,
+		`SELECT type FROM chats WHERE id = $1 AND deleted_at IS NULL`, chatID).Scan(&chatType)
+	if database.IsNoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("bots: read chat type: %w", err)
+	}
+	return chatType == "private", nil
+}
+
+// MessageAuthorIfBot returns the author of a message when that author is a
+// bot, and nil otherwise.
+//
+// Replying to a bot is how someone addresses it without typing a command, so
+// this decides whether a reply reaches a bot that has privacy mode on.
+func (r *Repository) MessageAuthorIfBot(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error) {
+	var author *uuid.UUID
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT m.sender_id
+		  FROM messages m
+		  JOIN bots b ON b.user_id = m.sender_id
+		 WHERE m.id = $1`, messageID).Scan(&author)
+	if database.IsNoRows(err) {
+		return nil, nil // not a bot's message, which is the usual case
+	}
+	if err != nil {
+		return nil, fmt.Errorf("bots: resolve reply author: %w", err)
+	}
+	return author, nil
+}
+
+// BotIDByUsername resolves a handle to a bot, or nil when the handle is not a
+// bot's.
+func (r *Repository) BotIDByUsername(ctx context.Context, username string) (*uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT b.user_id
+		  FROM bots b
+		  JOIN users u ON u.id = b.user_id
+		 WHERE u.username = $1 AND u.deleted_at IS NULL AND b.is_active`,
+		username).Scan(&id)
+	if database.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("bots: resolve bot username: %w", err)
+	}
+	return &id, nil
+}
+
+// BotIDsByUsernames resolves the handles a message mentions to bot ids,
+// ignoring the ones that name people rather than bots.
+func (r *Repository) BotIDsByUsernames(ctx context.Context, usernames []string) ([]uuid.UUID, error) {
+	if len(usernames) == 0 {
+		return nil, nil
+	}
+
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT b.user_id
+		  FROM bots b
+		  JOIN users u ON u.id = b.user_id
+		 WHERE u.username = ANY($1::citext[])
+		   AND u.deleted_at IS NULL AND b.is_active`, usernames)
+	if err != nil {
+		return nil, fmt.Errorf("bots: resolve mentioned bots: %w", err)
 	}
 	defer rows.Close()
 

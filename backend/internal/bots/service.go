@@ -30,10 +30,75 @@ type Service struct {
 	repo      *Repository
 	messaging *messaging.Service
 	logger    *slog.Logger
+
+	// internal holds the bots this process answers for itself rather than
+	// handing to an outside program over the API. BotFather is one: it manages
+	// the platform's own bots, so running it anywhere else would mean issuing
+	// it a token that could create bots for anybody.
+	//
+	// Written during assembly and only read afterwards, so it needs no lock.
+	internal map[uuid.UUID]InternalBot
+}
+
+// InternalBot is a bot implemented inside the server.
+type InternalBot interface {
+	// Handle answers one message. Its reply, if any, is sent as the bot.
+	Handle(ctx context.Context, in InternalMessage) error
+}
+
+// InternalMessage is what an in-process bot is given.
+type InternalMessage struct {
+	BotID    uuid.UUID
+	ChatID   uuid.UUID
+	SenderID uuid.UUID
+	Content  string
+	// Command is set when the message was a command, so a handler does not
+	// have to parse the text again.
+	Command *CommandCall
 }
 
 func NewService(repo *Repository, messagingService *messaging.Service, logger *slog.Logger) *Service {
-	return &Service{repo: repo, messaging: messagingService, logger: logger}
+	return &Service{
+		repo:      repo,
+		messaging: messagingService,
+		logger:    logger,
+		internal:  make(map[uuid.UUID]InternalBot),
+	}
+}
+
+// RegisterInternal attaches an in-process handler to a bot account.
+func (s *Service) RegisterInternal(botID uuid.UUID, handler InternalBot) {
+	s.internal[botID] = handler
+}
+
+// runInternal hands a message to an in-process bot.
+//
+// Its failures are logged rather than returned, for the same reason the rest
+// of the observer path swallows them: the person who sent the message has
+// already been told it went.
+func (s *Service) runInternal(
+	ctx context.Context,
+	handler InternalBot,
+	botID uuid.UUID,
+	message *messaging.Message,
+	command *CommandCall,
+) {
+	if message.SenderID == nil {
+		return
+	}
+
+	if err := handler.Handle(ctx, InternalMessage{
+		BotID:    botID,
+		ChatID:   message.ChatID,
+		SenderID: *message.SenderID,
+		Content:  message.Content,
+		Command:  command,
+	}); err != nil {
+		s.logger.Warn("an in-process bot failed to handle a message",
+			slog.String("bot_id", botID.String()),
+			slog.String("message_id", message.ID.String()),
+			slog.Any("error", err))
+	}
 }
 
 // Register creates a bot for an owner.
@@ -256,25 +321,6 @@ func (s *Service) SendMessage(ctx context.Context, botID, chatID uuid.UUID, cont
 		Content:         content,
 		ReplyToID:       replyTo,
 	})
-}
-
-// NotifyMessage queues a message update for every bot that should see it.
-//
-// Called from the messaging path after a successful send. Failures are logged
-// and swallowed: a bot's queue must never be able to fail someone's message.
-func (s *Service) NotifyMessage(ctx context.Context, chatID uuid.UUID, message any, isCommand bool, replyToBot *uuid.UUID) {
-	recipients, err := s.repo.SubscribedBots(ctx, chatID, isCommand, replyToBot)
-	if err != nil {
-		s.logger.Warn("could not resolve bot recipients", slog.Any("error", err))
-		return
-	}
-
-	for _, botID := range recipients {
-		if err := s.repo.Enqueue(ctx, botID, "message", message); err != nil {
-			s.logger.Warn("could not enqueue a bot update",
-				slog.String("bot_id", botID.String()), slog.Any("error", err))
-		}
-	}
 }
 
 // validateWebhookURL refuses anything the server must not fetch.
