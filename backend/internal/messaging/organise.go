@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/httpx"
@@ -220,6 +219,21 @@ func (r *Repository) PinnedMessages(ctx context.Context, chatID, viewerID uuid.U
 
 // ---------------------------------------------------------------- scheduling
 
+// maxScheduledPublishAttempts bounds how often a stuck post is retried.
+//
+// A post whose chat has been deleted, or whose author has been removed from it,
+// can never publish. Retrying it every tick for ever would keep the publisher
+// busy and bury real failures in the log, so after this many tries it is
+// abandoned — recorded with its error, not deleted, so the author can be told.
+const maxScheduledPublishAttempts = 5
+
+// scheduledClaimLease is how long a claimed post stays out of the queue.
+//
+// Long enough that a publisher working through a batch is never handed its own
+// backlog again, short enough that a publisher killed mid-batch releases its
+// work within one tick or two rather than leaving posts stranded.
+const scheduledClaimLease = 2 * time.Minute
+
 // ScheduleParams is a message to publish later.
 type ScheduleParams struct {
 	ChatID          uuid.UUID
@@ -228,6 +242,8 @@ type ScheduleParams struct {
 	Type            string
 	Content         string
 	Attachments     []Attachment
+	ReplyToID       *uuid.UUID
+	IsSilent        bool
 	PublishAt       time.Time
 }
 
@@ -240,14 +256,26 @@ type ScheduledMessage struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	ScheduledAt time.Time    `json:"scheduled_at"`
 	CreatedAt   time.Time    `json:"created_at"`
+	// Attempts and LastError are how the compose screen explains a post that
+	// did not go out.
+	Attempts  int    `json:"attempts,omitempty"`
+	LastError string `json:"last_error,omitempty"`
 }
 
-// Schedule stores a message with no sequence number.
+// Schedule stores a post in the queue, not in the conversation.
 //
-// A scheduled message deliberately gets no `seq` and no recipient events: it
-// is not in the conversation yet. Publishing assigns the sequence, so ordering
-// reflects when a message became visible rather than when it was written.
+// It deliberately does not touch `messages`: a queued post has no sequence
+// number, and a seq-less row in that table would sort to the top of history.
+// It becomes a message at publication, through the ordinary send path.
 func (r *Repository) Schedule(ctx context.Context, in ScheduleParams) (*ScheduledMessage, error) {
+	attachments, err := json.Marshal(in.Attachments)
+	if err != nil {
+		return nil, fmt.Errorf("messaging: encode scheduled attachments: %w", err)
+	}
+	if in.Attachments == nil {
+		attachments = []byte("[]")
+	}
+
 	scheduled := &ScheduledMessage{
 		ChatID:      in.ChatID,
 		Type:        in.Type,
@@ -256,32 +284,41 @@ func (r *Repository) Schedule(ctx context.Context, in ScheduleParams) (*Schedule
 		ScheduledAt: in.PublishAt,
 	}
 
-	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO messages (
-				chat_id, client_message_id, sender_id, type, content, scheduled_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (chat_id, client_message_id) DO UPDATE
-			SET scheduled_at = EXCLUDED.scheduled_at
-			RETURNING id, created_at`,
-			in.ChatID, in.ClientMessageID, in.SenderID, in.Type, in.Content, in.PublishAt,
-		).Scan(&scheduled.ID, &scheduled.CreatedAt); err != nil {
-			return fmt.Errorf("messaging: schedule: %w", err)
-		}
-
-		for _, attachment := range in.Attachments {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO message_attachments (message_id, media_id, position, caption)
-				VALUES ($1, $2, $3, $4)
-				ON CONFLICT DO NOTHING`,
-				scheduled.ID, attachment.MediaID, attachment.Position, attachment.Caption); err != nil {
-				return fmt.Errorf("messaging: schedule attachment: %w", err)
-			}
-		}
-		return nil
-	})
+	// Re-sending the same compose request reschedules rather than queueing a
+	// second copy, which is what makes a retry over a flaky link safe. A row
+	// that has already gone out is not resurrected: the WHERE on the DO UPDATE
+	// leaves it alone, and the caller is told it is too late.
+	err = r.db.Pool.QueryRow(ctx, `
+		INSERT INTO scheduled_messages (
+			chat_id, sender_id, client_message_id, type, content,
+			attachments, reply_to_id, is_silent, scheduled_at)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
+		ON CONFLICT (chat_id, sender_id, client_message_id) DO UPDATE
+		SET type         = EXCLUDED.type,
+		    content      = EXCLUDED.content,
+		    attachments  = EXCLUDED.attachments,
+		    reply_to_id  = EXCLUDED.reply_to_id,
+		    is_silent    = EXCLUDED.is_silent,
+		    scheduled_at = EXCLUDED.scheduled_at,
+		    attempts     = 0,
+		    last_error   = '',
+		    abandoned_at = NULL,
+		    -- Editing a queued post gives it a fresh start, including its
+		    -- place in the queue: a lease from an earlier attempt must not
+		    -- delay the revised version.
+		    claimed_until = NULL,
+		    updated_at   = now()
+		WHERE scheduled_messages.published_at IS NULL
+		RETURNING id, created_at`,
+		in.ChatID, in.SenderID, in.ClientMessageID, in.Type, in.Content,
+		attachments, in.ReplyToID, in.IsSilent, in.PublishAt,
+	).Scan(&scheduled.ID, &scheduled.CreatedAt)
+	if database.IsNoRows(err) {
+		// The DO UPDATE matched nothing, so the row exists and has published.
+		return nil, ErrAlreadyPublished
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("messaging: schedule: %w", err)
 	}
 	return scheduled, nil
 }
@@ -289,11 +326,10 @@ func (r *Repository) Schedule(ctx context.Context, in ScheduleParams) (*Schedule
 // ScheduledFor lists what the caller has queued in a chat.
 func (r *Repository) ScheduledFor(ctx context.Context, chatID, senderID uuid.UUID) ([]ScheduledMessage, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, chat_id, type, content, scheduled_at, created_at
-		  FROM messages
-		 WHERE chat_id = $1 AND sender_id = $2
-		   AND scheduled_at IS NOT NULL AND published_at IS NULL
-		   AND deleted_at IS NULL
+		SELECT id, chat_id, type, content, attachments, scheduled_at, created_at,
+		       attempts, last_error
+		  FROM scheduled_messages
+		 WHERE chat_id = $1 AND sender_id = $2 AND published_at IS NULL
 		 ORDER BY scheduled_at`, chatID, senderID)
 	if err != nil {
 		return nil, fmt.Errorf("messaging: read scheduled: %w", err)
@@ -302,23 +338,31 @@ func (r *Repository) ScheduledFor(ctx context.Context, chatID, senderID uuid.UUI
 
 	var messages []ScheduledMessage
 	for rows.Next() {
-		var message ScheduledMessage
+		var (
+			message   ScheduledMessage
+			rawAttach []byte
+		)
 		if err := rows.Scan(&message.ID, &message.ChatID, &message.Type, &message.Content,
-			&message.ScheduledAt, &message.CreatedAt); err != nil {
+			&rawAttach, &message.ScheduledAt, &message.CreatedAt,
+			&message.Attempts, &message.LastError); err != nil {
 			return nil, err
+		}
+		if len(rawAttach) > 0 {
+			if err := json.Unmarshal(rawAttach, &message.Attachments); err != nil {
+				return nil, fmt.Errorf("messaging: decode scheduled attachments: %w", err)
+			}
 		}
 		messages = append(messages, message)
 	}
 	return messages, rows.Err()
 }
 
-// CancelScheduled removes a queued message before it publishes.
-func (r *Repository) CancelScheduled(ctx context.Context, messageID, senderID uuid.UUID) error {
+// CancelScheduled removes a queued post before it publishes.
+func (r *Repository) CancelScheduled(ctx context.Context, scheduledID, senderID uuid.UUID) error {
 	tag, err := r.db.Pool.Exec(ctx, `
-		DELETE FROM messages
-		 WHERE id = $1 AND sender_id = $2
-		   AND scheduled_at IS NOT NULL AND published_at IS NULL`,
-		messageID, senderID)
+		DELETE FROM scheduled_messages
+		 WHERE id = $1 AND sender_id = $2 AND published_at IS NULL`,
+		scheduledID, senderID)
 	if err != nil {
 		return fmt.Errorf("messaging: cancel scheduled: %w", err)
 	}
@@ -328,140 +372,112 @@ func (r *Repository) CancelScheduled(ctx context.Context, messageID, senderID uu
 	return nil
 }
 
-// ClaimDueScheduled takes ownership of messages whose time has come.
+// DueScheduled is a claimed post, ready to be sent.
+type DueScheduled struct {
+	ID              uuid.UUID
+	ChatID          uuid.UUID
+	SenderID        uuid.UUID
+	ClientMessageID uuid.UUID
+	Type            string
+	Content         string
+	Attachments     []Attachment
+	ReplyToID       *uuid.UUID
+	IsSilent        bool
+	Attempts        int
+}
+
+// ClaimDueScheduled takes ownership of posts whose time has come.
 //
-// The rows are selected FOR UPDATE SKIP LOCKED and stamped published in the
-// same statement, so two publisher workers cannot both take one message.
-func (r *Repository) ClaimDueScheduled(ctx context.Context, limit int) ([]uuid.UUID, error) {
+// Two things separate two publishers here, and they do different jobs.
+// FOR UPDATE SKIP LOCKED separates workers claiming at the same instant: each
+// gets a different set and neither waits. The lease separates them over time —
+// a claimed post is invisible to the queue until the lease expires, so a
+// publisher part-way through a batch is never handed its own backlog again.
+// Without the lease every tick would re-offer the same posts and spend one of
+// each post's attempts, and a publisher that was merely slow would abandon
+// perfectly healthy posts.
+//
+// Neither is what makes publication exactly-once. The claim is not publication:
+// the row is marked published only once a message exists. A worker that dies in
+// between leaves a lease that expires and the post is claimed again — which is
+// safe because the send carries the same client_message_id, so the retry
+// resolves to the message already created rather than making a second one.
+func (r *Repository) ClaimDueScheduled(ctx context.Context, limit int) ([]DueScheduled, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		UPDATE messages SET published_at = now()
-		 WHERE id IN (
-		     SELECT id FROM messages
-		      WHERE scheduled_at IS NOT NULL
-		        AND published_at IS NULL
-		        AND deleted_at IS NULL
+		UPDATE scheduled_messages s
+		   SET attempts      = s.attempts + 1,
+		       claimed_until = now() + $2::interval,
+		       updated_at    = now()
+		 WHERE s.id IN (
+		     SELECT id FROM scheduled_messages
+		      WHERE published_at IS NULL
+		        AND abandoned_at IS NULL
 		        AND scheduled_at <= now()
+		        AND (claimed_until IS NULL OR claimed_until <= now())
 		      ORDER BY scheduled_at
 		      FOR UPDATE SKIP LOCKED
 		      LIMIT $1)
-		 RETURNING id`, limit)
+		 RETURNING s.id, s.chat_id, s.sender_id, s.client_message_id, s.type,
+		           s.content, s.attachments, s.reply_to_id, s.is_silent, s.attempts`,
+		limit, scheduledClaimLease.String())
 	if err != nil {
 		return nil, fmt.Errorf("messaging: claim due scheduled: %w", err)
 	}
 	defer rows.Close()
 
-	var ids []uuid.UUID
+	var due []DueScheduled
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var (
+			item      DueScheduled
+			rawAttach []byte
+		)
+		if err := rows.Scan(&item.ID, &item.ChatID, &item.SenderID, &item.ClientMessageID,
+			&item.Type, &item.Content, &rawAttach, &item.ReplyToID, &item.IsSilent,
+			&item.Attempts); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		if len(rawAttach) > 0 {
+			if err := json.Unmarshal(rawAttach, &item.Attachments); err != nil {
+				return nil, fmt.Errorf("messaging: decode scheduled attachments: %w", err)
+			}
+		}
+		due = append(due, item)
 	}
-	return ids, rows.Err()
+	return due, rows.Err()
 }
 
-// PublishScheduled gives a claimed message its sequence and recipient events,
-// which is what puts it into the conversation.
-func (r *Repository) PublishScheduled(ctx context.Context, messageID uuid.UUID) (*SendResult, error) {
-	result := &SendResult{}
-
-	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
-		var (
-			chatID      uuid.UUID
-			senderID    uuid.UUID
-			lastSeq     int64
-			memberCount int
-		)
-		if err := tx.QueryRow(ctx,
-			`SELECT chat_id, sender_id FROM messages WHERE id = $1`, messageID,
-		).Scan(&chatID, &senderID); err != nil {
-			if database.IsNoRows(err) {
-				return ErrNotFound
-			}
-			return fmt.Errorf("messaging: read scheduled message: %w", err)
-		}
-
-		// The same row lock the live send path takes, for the same reason:
-		// two publishers must not hand out one sequence number twice.
-		if err := tx.QueryRow(ctx,
-			`SELECT last_seq, member_count FROM chats WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
-			chatID).Scan(&lastSeq, &memberCount); err != nil {
-			if database.IsNoRows(err) {
-				return ErrNotFound
-			}
-			return fmt.Errorf("messaging: lock chat: %w", err)
-		}
-		seq := lastSeq + 1
-
-		message := &Message{}
-		if err := tx.QueryRow(ctx, `
-			UPDATE messages SET seq = $2, created_at = now()
-			 WHERE id = $1
-			 RETURNING id, chat_id, seq, sender_id, client_message_id, type, content,
-			           entities, payload, reply_to_id, is_pinned, created_at, edited_at, deleted_at`,
-			messageID, seq,
-		).Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID,
-			&message.ClientMessageID, &message.Type, &message.Content, &message.Entities,
-			&message.Payload, &message.ReplyToID, &message.IsPinned, &message.CreatedAt,
-			&message.EditedAt, &message.DeletedAt); err != nil {
-			return fmt.Errorf("messaging: publish scheduled: %w", err)
-		}
-
-		if _, err := tx.Exec(ctx, `
-			UPDATE chats
-			SET last_seq = $2, last_message_id = $3, last_message_at = $4, updated_at = now()
-			WHERE id = $1`, chatID, seq, message.ID, message.CreatedAt); err != nil {
-			return fmt.Errorf("messaging: advance chat: %w", err)
-		}
-
-		// The author's own cursor moves with the message, exactly as on the
-		// live path: it must never come back to them as unread.
-		if _, err := tx.Exec(ctx, `
-			UPDATE chat_members
-			SET last_read_seq = $3, last_delivered_seq = $3
-			WHERE chat_id = $1 AND user_id = $2`, chatID, senderID, seq); err != nil {
-			return fmt.Errorf("messaging: advance sender cursor: %w", err)
-		}
-
-		result.Message = message
-
-		// Above the threshold the chat is pull-based, so there is no
-		// per-recipient log to write — the same split the live send makes.
-		if memberCount > FanoutThreshold {
-			return nil
-		}
-		result.FannedOut = true
-
-		if _, err := tx.Exec(ctx, `
-			UPDATE chat_members m
-			SET unread_count = m.unread_count + 1
-			WHERE m.chat_id = $1 AND m.user_id <> $2 AND m.left_at IS NULL`,
-			chatID, senderID); err != nil {
-			return fmt.Errorf("messaging: bump unread counts: %w", err)
-		}
-
-		payload, err := json.Marshal(map[string]any{
-			"chat_id": chatID,
-			"message": message,
-		})
-		if err != nil {
-			return fmt.Errorf("messaging: marshal event: %w", err)
-		}
-
-		recipients, seqs, err := appendUserEvents(ctx, tx, chatID, senderID,
-			EventMessageNew, payload)
-		if err != nil {
-			return err
-		}
-		result.Recipients = recipients
-		result.EventSeqs = seqs
-		return nil
-	})
+// MarkScheduledPublished records which message a queued post became.
+func (r *Repository) MarkScheduledPublished(ctx context.Context, scheduledID, messageID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx, `
+		UPDATE scheduled_messages
+		   SET published_at = now(), published_message_id = $2,
+		       last_error = '', updated_at = now()
+		 WHERE id = $1 AND published_at IS NULL`, scheduledID, messageID)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("messaging: mark scheduled published: %w", err)
 	}
-	return result, nil
+	return nil
+}
+
+// MarkScheduledFailed records why a post did not go out, and abandons it once
+// it has failed too often to be worth retrying.
+func (r *Repository) MarkScheduledFailed(ctx context.Context, scheduledID uuid.UUID, reason string) error {
+	// The reason is stored bounded: it comes from an error string, which can
+	// carry a whole driver message.
+	if len([]rune(reason)) > 500 {
+		reason = string([]rune(reason)[:500])
+	}
+	_, err := r.db.Pool.Exec(ctx, `
+		UPDATE scheduled_messages
+		   SET last_error   = $2,
+		       abandoned_at = CASE WHEN attempts >= $3 THEN now() ELSE abandoned_at END,
+		       updated_at   = now()
+		 WHERE id = $1 AND published_at IS NULL`,
+		scheduledID, reason, maxScheduledPublishAttempts)
+	if err != nil {
+		return fmt.Errorf("messaging: mark scheduled failed: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- service
@@ -637,6 +653,10 @@ func (s *Service) Schedule(ctx context.Context, in ScheduleParams) (*ScheduledMe
 
 	scheduled, err := s.repo.Schedule(ctx, in)
 	if err != nil {
+		if errors.Is(err, ErrAlreadyPublished) {
+			return nil, httpx.Conflict(httpx.CodeConflict,
+				"That message has already been sent")
+		}
 		return nil, httpx.Internal(err)
 	}
 	return scheduled, nil
@@ -650,8 +670,8 @@ func (s *Service) ScheduledFor(ctx context.Context, chatID, senderID uuid.UUID) 
 	return messages, nil
 }
 
-func (s *Service) CancelScheduled(ctx context.Context, messageID, senderID uuid.UUID) error {
-	if err := s.repo.CancelScheduled(ctx, messageID, senderID); err != nil {
+func (s *Service) CancelScheduled(ctx context.Context, scheduledID, senderID uuid.UUID) error {
+	if err := s.repo.CancelScheduled(ctx, scheduledID, senderID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return httpx.NotFound(httpx.CodeMessageNotFound, "That message is not scheduled")
 		}
@@ -662,26 +682,55 @@ func (s *Service) CancelScheduled(ctx context.Context, messageID, senderID uuid.
 
 // PublishDue publishes everything whose time has come; the scheduler worker
 // calls it. It returns how many were published.
+//
+// Each post goes out through Send, the same path a live message takes. That is
+// deliberate: sequence allocation, recipient events, unread counts, fan-out and
+// the permission re-check are all one implementation, so a scheduled message
+// cannot drift into behaving differently from a typed one. It also makes
+// publication exactly-once for free — the send carries the queued row's
+// client_message_id, so a worker that dies before recording the result re-sends
+// and the idempotency key returns the message already created.
 func (s *Service) PublishDue(ctx context.Context, limit int) (int, error) {
-	ids, err := s.repo.ClaimDueScheduled(ctx, limit)
+	due, err := s.repo.ClaimDueScheduled(ctx, limit)
 	if err != nil {
 		return 0, err
 	}
 
 	published := 0
-	for _, id := range ids {
-		result, err := s.repo.PublishScheduled(ctx, id)
+	for _, item := range due {
+		// The author's right to post is re-checked at publication, not trusted
+		// from when they queued it: they may have been muted, restricted or
+		// removed from the chat in between.
+		message, err := s.Send(ctx, SendInput{
+			ChatID:          item.ChatID,
+			SenderID:        item.SenderID,
+			ClientMessageID: item.ClientMessageID,
+			Type:            item.Type,
+			Content:         item.Content,
+			Attachments:     item.Attachments,
+			ReplyToID:       item.ReplyToID,
+			IsSilent:        item.IsSilent,
+		})
 		if err != nil {
-			// One bad message must not stall the queue behind it.
+			// One bad post must not stall the queue behind it. The reason is
+			// recorded on the row so the author can be shown why.
 			s.logger.Warn("could not publish a scheduled message",
-				slog.String("message_id", id.String()), slog.Any("error", err))
+				slog.String("scheduled_id", item.ID.String()),
+				slog.Int("attempts", item.Attempts),
+				slog.Any("error", err))
+			if markErr := s.repo.MarkScheduledFailed(ctx, item.ID, err.Error()); markErr != nil {
+				s.logger.Error("could not record a scheduled publish failure",
+					slog.String("scheduled_id", item.ID.String()), slog.Any("error", markErr))
+			}
 			continue
 		}
 
-		chatCtx := &ChatContext{ChatID: result.Message.ChatID}
-		s.broadcast(ctx, chatCtx, EventMessageNew, result, map[string]any{
-			"message": result.Message,
-		})
+		if err := s.repo.MarkScheduledPublished(ctx, item.ID, message.ID); err != nil {
+			// The message is out; failing to record that only risks a repeat
+			// attempt, which the idempotency key makes harmless.
+			s.logger.Error("could not record a scheduled publication",
+				slog.String("scheduled_id", item.ID.String()), slog.Any("error", err))
+		}
 		published++
 	}
 	return published, nil
@@ -700,7 +749,7 @@ func (h *Handler) RegisterOrganiseRoutes(r chi.Router) {
 	r.Put("/{chatID}/mute", h.setMuted)
 	r.Get("/{chatID}/scheduled", h.scheduled)
 	r.Post("/{chatID}/scheduled", h.schedule)
-	r.Delete("/{chatID}/scheduled/{messageID}", h.cancelScheduled)
+	r.Delete("/{chatID}/scheduled/{scheduledID}", h.cancelScheduled)
 }
 
 // RegisterPinRoute adds pinning to the /messages router, where the message id
@@ -886,6 +935,8 @@ func (h *Handler) schedule(w http.ResponseWriter, r *http.Request) {
 		Type            string       `json:"type"`
 		Content         string       `json:"content"`
 		Attachments     []Attachment `json:"attachments"`
+		ReplyToID       *uuid.UUID   `json:"reply_to_id"`
+		IsSilent        bool         `json:"is_silent"`
 		ScheduledAt     time.Time    `json:"scheduled_at"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
@@ -903,6 +954,8 @@ func (h *Handler) schedule(w http.ResponseWriter, r *http.Request) {
 		Type:            body.Type,
 		Content:         body.Content,
 		Attachments:     body.Attachments,
+		ReplyToID:       body.ReplyToID,
+		IsSilent:        body.IsSilent,
 		PublishAt:       body.ScheduledAt,
 	})
 	if err != nil {
@@ -918,13 +971,13 @@ func (h *Handler) cancelScheduled(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	messageID, err := pathUUID(r, "messageID")
+	scheduledID, err := pathUUID(r, "scheduledID")
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 
-	if err := h.service.CancelScheduled(r.Context(), messageID, principal.UserID); err != nil {
+	if err := h.service.CancelScheduled(r.Context(), scheduledID, principal.UserID); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}

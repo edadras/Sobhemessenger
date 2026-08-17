@@ -16,6 +16,9 @@ import (
 var (
 	ErrNotFound  = errors.New("messaging: not found")
 	ErrNotMember = errors.New("messaging: caller is not a member of this chat")
+	// ErrAlreadyPublished is what rescheduling a post that has already gone
+	// out returns: it is a message now, and messages are edited, not rescheduled.
+	ErrAlreadyPublished = errors.New("messaging: that message has already been published")
 )
 
 // FanoutThreshold bounds how many per-user event rows one message may create.
