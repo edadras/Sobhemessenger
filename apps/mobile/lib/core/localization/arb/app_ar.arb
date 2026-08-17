@@ -383,5 +383,19 @@
   "inlineSearching": "جارٍ البحث…",
   "inlineNoResults": "لم يجد هذا الروبوت شيئًا",
   "locationAccuracy": "بدقة نحو {metres} متر",
-  "locationLiveUntil": "مباشر حتى {time}"
+  "locationLiveUntil": "مباشر حتى {time}",
+  "secretChatTitle": "محادثة مُعمّاة",
+  "secretChatStart": "بدء محادثة مُعمّاة",
+  "secretChatComposeHint": "رسالة مُعمّاة",
+  "secretChatEmptyTitle": "لا توجد رسائل بعد",
+  "secretChatEmptyBody": "تُعمّى رسائل هذه المحادثة على هذا الجهاز، ولا يمكن فتحها إلا على جهاز مُراسلك.",
+  "secretChatEphemeralNotice": "الرسائل المفتوحة لا تُحفظ على هذا الجهاز وتختفي عند إغلاق التطبيق.",
+  "secretChatSetupFailed": "تعذّر تهيئة هذا الجهاز للمحادثات المُعمّاة.",
+  "secretChatNoDevices": "لا يملك هذا الشخص جهازًا مهيّأً للمحادثات المُعمّاة.",
+  "secretChatSendFailed": "لم تُرسل",
+  "secretChatVerify": "تحقّق من رقم الأمان",
+  "safetyNumberTitle": "رقم الأمان",
+  "safetyNumberExplain": "قارن هذا الرقم مع مُراسلك خارج هذا التطبيق — وجهًا لوجه أو عبر مكالمة صوتية. إذا تطابق الرقمان فلا أحد بينكما.",
+  "safetyNumberDevice": "الجهاز {index} من {total}",
+  "safetyNumberUnknown": "لا يوجد رقم أمان قبل تبادل رسالة واحدة على الأقل."
 }

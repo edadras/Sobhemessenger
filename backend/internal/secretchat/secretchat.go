@@ -47,14 +47,20 @@ const (
 	EventSecretSession = "secret.session"
 )
 
-// Key sizes for the X25519/Ed25519 material the client publishes. The server
-// cannot verify the mathematics, but it can refuse anything that is obviously
-// not a key — which stops a client bug from poisoning the directory.
+// Key sizes for the material a client publishes. The server cannot verify the
+// mathematics — it holds no private key and is not meant to — but it can refuse
+// anything that is obviously not a key, which stops a client bug from poisoning
+// the directory for everyone who looks a device up.
+//
+// 33 bytes is the Signal wire format for a Curve25519 public key: a one-byte
+// curve identifier followed by the 32-byte key. It is not 32 plus a mistake.
+// Storing the identifier matters — a key whose curve is implied by convention
+// is a key that cannot be migrated to another curve later without ambiguity.
 const (
-	identityKeyLength     = 32
-	signedPrekeyLength    = 32
+	identityKeyLength     = 33
+	signedPrekeyLength    = 33
 	prekeySignatureLength = 64
-	oneTimePrekeyLength   = 32
+	oneTimePrekeyLength   = 33
 	maxOneTimePrekeys     = 200
 	// lowPrekeyWatermark is the count below which the client is told to upload
 	// more. Running out means new conversations cannot start.
@@ -67,8 +73,13 @@ type KeyBundle struct {
 	UserID          uuid.UUID `json:"user_id"`
 	RegistrationID  int       `json:"registration_id"`
 	IdentityKey     string    `json:"identity_key"`
-	SignedPrekey    string    `json:"signed_prekey"`
-	PrekeySignature string    `json:"prekey_signature"`
+	// SignedPrekeyID names which signed prekey the bundle carries. A session
+	// initiator quotes it back, and the recipient looks it up to derive the
+	// same secret — without it the first message of a conversation cannot be
+	// decrypted at all.
+	SignedPrekeyID  int    `json:"signed_prekey_id"`
+	SignedPrekey    string `json:"signed_prekey"`
+	PrekeySignature string `json:"prekey_signature"`
 	// OneTimePrekey is present only in a claimed bundle, and only once.
 	OneTimePrekey *OneTimePrekey `json:"one_time_prekey,omitempty"`
 }
@@ -103,7 +114,7 @@ func NewRepository(db *database.DB) *Repository { return &Repository{db: db} }
 // Rotating the identity key invalidates every existing session for that
 // device, which is exactly what should happen after a reinstall: the peer sees
 // a changed safety number and is warned.
-func (r *Repository) PublishKeys(ctx context.Context, deviceID, userID uuid.UUID, identityKey, signedPrekey, signature []byte, registrationID int, oneTimePrekeys []OneTimePrekey) error {
+func (r *Repository) PublishKeys(ctx context.Context, deviceID, userID uuid.UUID, identityKey, signedPrekey, signature []byte, registrationID, signedPrekeyID int, oneTimePrekeys []OneTimePrekey) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		var previousIdentity []byte
 		err := tx.QueryRow(ctx,
@@ -115,15 +126,18 @@ func (r *Repository) PublishKeys(ctx context.Context, deviceID, userID uuid.UUID
 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO device_identity_keys (
-				device_id, user_id, identity_key, signed_prekey, prekey_signature, registration_id)
-			VALUES ($1, $2, $3, $4, $5, $6)
+				device_id, user_id, identity_key, signed_prekey, prekey_signature,
+				registration_id, signed_prekey_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (device_id) DO UPDATE
 			SET identity_key = EXCLUDED.identity_key,
 			    signed_prekey = EXCLUDED.signed_prekey,
 			    prekey_signature = EXCLUDED.prekey_signature,
 			    registration_id = EXCLUDED.registration_id,
+			    signed_prekey_id = EXCLUDED.signed_prekey_id,
 			    updated_at = now()`,
-			deviceID, userID, identityKey, signedPrekey, signature, registrationID); err != nil {
+			deviceID, userID, identityKey, signedPrekey, signature,
+			registrationID, signedPrekeyID); err != nil {
 			return fmt.Errorf("secretchat: publish keys: %w", err)
 		}
 
@@ -174,11 +188,13 @@ func (r *Repository) ClaimBundle(ctx context.Context, deviceID, claimedBy uuid.U
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
 		var identityKey, signedPrekey, signature []byte
 		err := tx.QueryRow(ctx, `
-			SELECT k.user_id, k.identity_key, k.signed_prekey, k.prekey_signature, k.registration_id
+			SELECT k.user_id, k.identity_key, k.signed_prekey, k.prekey_signature,
+			       k.registration_id, k.signed_prekey_id
 			FROM device_identity_keys k
 			JOIN devices d ON d.id = k.device_id AND d.revoked_at IS NULL
 			WHERE k.device_id = $1`, deviceID,
-		).Scan(&bundle.UserID, &identityKey, &signedPrekey, &signature, &bundle.RegistrationID)
+		).Scan(&bundle.UserID, &identityKey, &signedPrekey, &signature,
+			&bundle.RegistrationID, &bundle.SignedPrekeyID)
 		if database.IsNoRows(err) {
 			return ErrKeysMissing
 		}
@@ -273,6 +289,95 @@ func (r *Repository) AvailablePrekeyCount(ctx context.Context, deviceID uuid.UUI
 	err := r.db.Pool.QueryRow(ctx,
 		`SELECT available_prekey_count($1)`, deviceID).Scan(&count)
 	return count, err
+}
+
+// EnsureSecretChat returns the existing secret chat between two users, or
+// creates it. Reports whether it created one.
+//
+// The pair is ordered before it is stored so that (a, b) and (b, a) are the
+// same key; the unique constraint then makes this safe under a race, with the
+// loser of the insert re-reading the winner's row. It mirrors
+// messaging.EnsurePrivateChat deliberately — a secret chat is an ordinary
+// two-person conversation whose bodies happen to be opaque, and giving it a
+// second, subtly different pairing rule would be a source of bugs rather than
+// of clarity.
+func (r *Repository) EnsureSecretChat(ctx context.Context, a, b uuid.UUID) (uuid.UUID, bool, error) {
+	if a == b {
+		// There is no second party to run X3DH against, so there is nothing to
+		// encrypt to. Saved Messages is a plain private chat and already exists.
+		return uuid.Nil, false, httpx.Validation("You cannot start an encrypted chat with yourself").
+			WithField("user_id", "must be someone else")
+	}
+
+	low, high := a, b
+	if high.String() < low.String() {
+		low, high = high, low
+	}
+
+	var chatID uuid.UUID
+	err := r.db.Pool.QueryRow(ctx,
+		`SELECT chat_id FROM secret_chat_keys WHERE user_a_id = $1 AND user_b_id = $2`,
+		low, high).Scan(&chatID)
+	if err == nil {
+		return chatID, false, nil
+	}
+	if !database.IsNoRows(err) {
+		return uuid.Nil, false, fmt.Errorf("secretchat: lookup secret chat: %w", err)
+	}
+
+	created := false
+	err = r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO chats (type, creator_id, member_count) VALUES ('secret', $1, 2) RETURNING id`,
+			a).Scan(&chatID); err != nil {
+			return fmt.Errorf("secretchat: create secret chat: %w", err)
+		}
+
+		// A unique violation here is returned untouched so the caller below can
+		// recognise it. It must not be handled inside this function: PostgreSQL
+		// aborts the whole transaction on the error, and every further
+		// statement in it — including a SELECT to find the winner's row — fails
+		// with 25P02 until it is rolled back. The re-read has to happen after.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO secret_chat_keys (chat_id, user_a_id, user_b_id) VALUES ($1, $2, $3)`,
+			chatID, low, high); err != nil {
+			if database.IsUniqueViolation(err) {
+				return err
+			}
+			return fmt.Errorf("secretchat: link secret chat: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO chat_members (chat_id, user_id, role)
+			VALUES ($1, $2, 'member'), ($1, $3, 'member')`, chatID, a, b); err != nil {
+			return fmt.Errorf("secretchat: add secret chat members: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO chat_settings (chat_id, max_members) VALUES ($1, 2)`, chatID); err != nil {
+			return fmt.Errorf("secretchat: create secret chat settings: %w", err)
+		}
+		created = true
+		return nil
+	})
+
+	switch {
+	case err == nil:
+		return chatID, created, nil
+
+	case database.IsUniqueViolation(err):
+		// Someone else created it first. Their row is committed and ours is
+		// rolled back — including the `chats` row this transaction inserted —
+		// so adopt theirs.
+		if err := r.db.Pool.QueryRow(ctx,
+			`SELECT chat_id FROM secret_chat_keys WHERE user_a_id = $1 AND user_b_id = $2`,
+			low, high).Scan(&chatID); err != nil {
+			return uuid.Nil, false, fmt.Errorf("secretchat: adopt racing secret chat: %w", err)
+		}
+		return chatID, false, nil
+
+	default:
+		return uuid.Nil, false, err
+	}
 }
 
 // CreateSession records a pending session between two devices.
@@ -385,6 +490,7 @@ type PublishInput struct {
 	UserID          uuid.UUID
 	RegistrationID  int
 	IdentityKey     string
+	SignedPrekeyID  int
 	SignedPrekey    string
 	PrekeySignature string
 	OneTimePrekeys  []OneTimePrekey
@@ -408,6 +514,11 @@ func (s *Service) PublishKeys(ctx context.Context, in PublishInput) error {
 		return httpx.Validation("registration_id is required").
 			WithField("registration_id", "must be positive")
 	}
+	if in.SignedPrekeyID <= 0 {
+		return httpx.Validation("signed_prekey_id is required").
+			WithField("signed_prekey_id",
+				"must be positive; a session initiator quotes it back")
+	}
 	if len(in.OneTimePrekeys) > maxOneTimePrekeys {
 		return httpx.Validation("Too many one-time prekeys").
 			WithField("one_time_prekeys", fmt.Sprintf("at most %d per request", maxOneTimePrekeys))
@@ -419,7 +530,8 @@ func (s *Service) PublishKeys(ctx context.Context, in PublishInput) error {
 	}
 
 	if err := s.repo.PublishKeys(ctx, in.DeviceID, in.UserID,
-		identityKey, signedPrekey, signature, in.RegistrationID, in.OneTimePrekeys); err != nil {
+		identityKey, signedPrekey, signature, in.RegistrationID,
+		in.SignedPrekeyID, in.OneTimePrekeys); err != nil {
 		if errors.Is(err, ErrInvalidKey) {
 			return httpx.Validation("A one-time prekey is not valid base64").
 				WithField("one_time_prekeys", "must be base64")
@@ -446,6 +558,43 @@ func (s *Service) PrekeyStatus(ctx context.Context, deviceID uuid.UUID) (*Prekey
 		Watermark:   lowPrekeyWatermark,
 		NeedsUpload: count < lowPrekeyWatermark,
 	}, nil
+}
+
+// OpenChat opens (creating if needed) the encrypted chat with a peer.
+//
+// The peer must have at least one device that has published key material. A
+// secret chat with someone who cannot receive one is not a conversation waiting
+// to start — nothing sent into it could ever be encrypted to anybody — so it is
+// refused here with a reason rather than created and left silently broken.
+func (s *Service) OpenChat(ctx context.Context, userID, peerID uuid.UUID) (uuid.UUID, bool, error) {
+	if peerID == uuid.Nil {
+		return uuid.Nil, false, httpx.Validation("user_id is required").
+			WithField("user_id", "required")
+	}
+
+	devices, err := s.repo.DevicesFor(ctx, peerID)
+	if err != nil {
+		return uuid.Nil, false, httpx.Internal(err)
+	}
+	if len(devices) == 0 {
+		return uuid.Nil, false, httpx.NotFound(httpx.CodeNotFound,
+			"That user has no device set up for encrypted chats")
+	}
+
+	chatID, created, err := s.repo.EnsureSecretChat(ctx, userID, peerID)
+	if err != nil {
+		// EnsureSecretChat raises a validation error for the self case, which
+		// already carries the message the caller should see.
+		var apiErr *httpx.Error
+		if errors.As(err, &apiErr) {
+			return uuid.Nil, false, err
+		}
+		if database.IsForeignKeyViolation(err) {
+			return uuid.Nil, false, httpx.NotFound(httpx.CodeNotFound, "User not found")
+		}
+		return uuid.Nil, false, httpx.Internal(err)
+	}
+	return chatID, created, nil
 }
 
 // Bundles returns a claimed key bundle for every device belonging to a user,
@@ -668,6 +817,7 @@ func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Post("/chats", h.openChat)
 	r.Post("/keys", h.publishKeys)
 	r.Get("/keys/status", h.prekeyStatus)
 	r.Get("/keys/{userID}", h.bundles)
@@ -677,6 +827,34 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/inbox", h.inbox)
 	r.Post("/inbox/ack", h.acknowledge)
 	return r
+}
+
+func (h *Handler) openChat(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		UserID uuid.UUID `json:"user_id"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	chatID, created, err := h.service.OpenChat(r.Context(), principal.UserID, body.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	// `created` lets the caller tell "here is your new encrypted chat" from
+	// "you already had one with this person" without a second request.
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"chat_id": chatID,
+		"created": created,
+	})
 }
 
 func (h *Handler) publishKeys(w http.ResponseWriter, r *http.Request) {
@@ -689,6 +867,7 @@ func (h *Handler) publishKeys(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		RegistrationID  int             `json:"registration_id"`
 		IdentityKey     string          `json:"identity_key"`
+		SignedPrekeyID  int             `json:"signed_prekey_id"`
 		SignedPrekey    string          `json:"signed_prekey"`
 		PrekeySignature string          `json:"prekey_signature"`
 		OneTimePrekeys  []OneTimePrekey `json:"one_time_prekeys"`
@@ -705,6 +884,7 @@ func (h *Handler) publishKeys(w http.ResponseWriter, r *http.Request) {
 		UserID:          principal.UserID,
 		RegistrationID:  body.RegistrationID,
 		IdentityKey:     body.IdentityKey,
+		SignedPrekeyID:  body.SignedPrekeyID,
 		SignedPrekey:    body.SignedPrekey,
 		PrekeySignature: body.PrekeySignature,
 		OneTimePrekeys:  body.OneTimePrekeys,

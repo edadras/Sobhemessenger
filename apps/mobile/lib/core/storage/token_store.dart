@@ -1,18 +1,26 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+/// The one hardened keychain configuration everything secret shares (§23).
+///
+/// Defined once so a second store cannot quietly be created with weaker
+/// options — `first_unlock_this_device` in particular keeps the data off
+/// iCloud backups and off any other device restored from them, which is the
+/// difference between a key that lives on this phone and a key that has been
+/// copied to a laptop.
+const FlutterSecureStorage sobhSecureStorage = FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  iOptions: IOSOptions(
+    accessibility: KeychainAccessibility.first_unlock_this_device,
+  ),
+);
+
 /// Stores credentials in the platform keychain / keystore (§23, §33).
 ///
 /// Tokens never touch shared preferences or the app database, so a filesystem
 /// backup or a rooted-device dump of app data does not expose a session.
 class TokenStore {
   TokenStore({FlutterSecureStorage? storage})
-      : _storage = storage ??
-            const FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
-              iOptions: IOSOptions(
-                accessibility: KeychainAccessibility.first_unlock_this_device,
-              ),
-            );
+      : _storage = storage ?? sobhSecureStorage;
 
   final FlutterSecureStorage _storage;
 

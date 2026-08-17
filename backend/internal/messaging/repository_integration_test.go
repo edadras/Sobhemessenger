@@ -94,6 +94,54 @@ func TestPrivateChatIsCreatedOnceForAPair(t *testing.T) {
 	}
 }
 
+func TestConcurrentOpensShareOnePrivateChat(t *testing.T) {
+	// Two people can tap each other's name at the same moment, and one person's
+	// two devices can do it on the same restore. Only one of the racers wins the
+	// insert; the rest must find and adopt the winner's chat.
+	//
+	// The losing path is easy to get wrong: the unique violation aborts the
+	// whole transaction, so a re-read attempted inside it fails with 25P02
+	// rather than returning the winner's row. This test is what distinguishes
+	// the two.
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+
+	const racers = 8
+	ids := make([]uuid.UUID, racers)
+	errs := make([]error, racers)
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			<-start
+			a, b := alice, bob
+			if slot%2 == 1 {
+				a, b = bob, alice
+			}
+			ids[slot], _, errs[slot] = repo.EnsurePrivateChat(context.Background(), a, b)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("racer %d: %v", i, err)
+		}
+	}
+	for i, id := range ids {
+		if id != ids[0] {
+			t.Errorf("racer %d got chat %s, want %s", i, id, ids[0])
+		}
+	}
+}
+
 func TestSendAssignsContiguousSequenceNumbers(t *testing.T) {
 	db := testDB(t)
 	repo := messaging.NewRepository(db)

@@ -8,6 +8,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../../chat/data/chat_repository.dart';
+import '../../secretchat/data/secret_chat_service.dart';
+import '../../secretchat/presentation/secret_chat_screen.dart';
 import '../data/address_book.dart';
 import '../data/contacts_repository.dart';
 
@@ -140,6 +142,47 @@ class _ContactTile extends ConsumerWidget {
     }
   }
 
+  /// Opens an encrypted conversation, creating it on first use (§24).
+  ///
+  /// It is pushed rather than routed through GoRouter: the screen needs the
+  /// peer's id and name, and putting a user id in the address bar of a
+  /// conversation whose whole point is that it leaves no trace is the wrong
+  /// default.
+  Future<void> _openSecretChat(BuildContext context, WidgetRef ref) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final NavigatorState navigator = Navigator.of(context);
+
+    try {
+      final String chatId =
+          await ref.read(secretChatServiceProvider).openChat(contact.userId);
+
+      await navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => SecretChatScreen(
+            chatId: chatId,
+            peerUserId: contact.userId,
+            peerName: contact.label,
+          ),
+        ),
+      );
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            switch (error.code) {
+              // The server refuses a chat with someone who has published no
+              // keys, which is a fact about them rather than a fault.
+              ApiErrorCode.notFound => l10n.secretChatNoDevices,
+              ApiErrorCode.network => l10n.errorNetwork,
+              _ => error.message,
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -163,6 +206,11 @@ class _ContactTile extends ConsumerWidget {
           final ContactsRepository repository =
               ref.read(contactsRepositoryProvider);
           switch (action) {
+            case 'secret':
+              if (context.mounted) {
+                await _openSecretChat(context, ref);
+              }
+              return;
             case 'favorite':
               await repository.setFavorite(contact.userId, !contact.isFavorite);
             case 'block':
@@ -174,6 +222,16 @@ class _ContactTile extends ConsumerWidget {
           ref.invalidate(contactListProvider);
         },
         itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            value: 'secret',
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.lock_outline, size: SobhSizes.iconMedium),
+                const SizedBox(width: SobhSpacing.sm),
+                Text(l10n.secretChatStart),
+              ],
+            ),
+          ),
           PopupMenuItem<String>(
             value: 'favorite',
             child: Row(

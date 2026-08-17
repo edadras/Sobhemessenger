@@ -73,6 +73,10 @@ func createDevice(t *testing.T, db *database.DB, userID uuid.UUID) uuid.UUID {
 // randomKey stands in for real key material. The server never does arithmetic
 // on these bytes, so random values of the right length exercise every path it
 // actually has.
+// signalPublicKeyBytes is the wire size of a Curve25519 public key: a one-byte
+// curve identifier followed by the key itself.
+const signalPublicKeyBytes = 33
+
 func randomKey(t *testing.T, size int) string {
 	t.Helper()
 	raw := make([]byte, size)
@@ -87,7 +91,7 @@ func prekeys(t *testing.T, from, count int) []secretchat.OneTimePrekey {
 	keys := make([]secretchat.OneTimePrekey, 0, count)
 	for i := 0; i < count; i++ {
 		keys = append(keys, secretchat.OneTimePrekey{
-			KeyID: from + i, PublicKey: randomKey(t, 32),
+			KeyID: from + i, PublicKey: randomKey(t, signalPublicKeyBytes),
 		})
 	}
 	return keys
@@ -101,11 +105,11 @@ func publish(t *testing.T, repo *secretchat.Repository, deviceID, userID uuid.UU
 	if err != nil {
 		t.Fatalf("decode identity key: %v", err)
 	}
-	signed := make([]byte, 32)
+	signed := make([]byte, signalPublicKeyBytes)
 	signature := make([]byte, 64)
 
 	if err := repo.PublishKeys(context.Background(), deviceID, userID,
-		identityRaw, signed, signature, 1, keys); err != nil {
+		identityRaw, signed, signature, 1, 1, keys); err != nil {
 		t.Fatalf("PublishKeys: %v", err)
 	}
 }
@@ -119,7 +123,7 @@ func TestClaimedPrekeyIsHandedOutExactlyOnce(t *testing.T) {
 	device := createDevice(t, db, owner)
 	caller := createDevice(t, db, createUser(t, db, "caller"))
 
-	publish(t, repo, device, owner, randomKey(t, 32), prekeys(t, 1, 3))
+	publish(t, repo, device, owner, randomKey(t, signalPublicKeyBytes), prekeys(t, 1, 3))
 
 	seen := make(map[int]bool)
 	for i := 0; i < 3; i++ {
@@ -148,7 +152,7 @@ func TestClaimFallsBackWhenPrekeysAreExhausted(t *testing.T) {
 	device := createDevice(t, db, owner)
 	caller := createDevice(t, db, createUser(t, db, "caller"))
 
-	publish(t, repo, device, owner, randomKey(t, 32), nil)
+	publish(t, repo, device, owner, randomKey(t, signalPublicKeyBytes), nil)
 
 	bundle, err := repo.ClaimBundle(ctx, device, caller)
 	if err != nil {
@@ -174,7 +178,7 @@ func TestConcurrentClaimsNeverShareAPrekey(t *testing.T) {
 	caller := createDevice(t, db, createUser(t, db, "caller"))
 
 	const available = 6
-	publish(t, repo, device, owner, randomKey(t, 32), prekeys(t, 1, available))
+	publish(t, repo, device, owner, randomKey(t, signalPublicKeyBytes), prekeys(t, 1, available))
 
 	const claimers = 12
 	var wg sync.WaitGroup
@@ -235,7 +239,7 @@ func TestRotatingTheIdentityKeyClearsStaleState(t *testing.T) {
 	aliceDevice := createDevice(t, db, alice)
 	bobDevice := createDevice(t, db, bob)
 
-	publish(t, repo, aliceDevice, alice, randomKey(t, 32), prekeys(t, 1, 5))
+	publish(t, repo, aliceDevice, alice, randomKey(t, signalPublicKeyBytes), prekeys(t, 1, 5))
 
 	chatID := createSecretChat(t, db, alice, bob)
 	sessionID, err := repo.CreateSession(ctx, chatID, bobDevice, aliceDevice, []byte("fingerprint"))
@@ -247,7 +251,7 @@ func TestRotatingTheIdentityKeyClearsStaleState(t *testing.T) {
 	}
 
 	// A different identity key: the reinstall case.
-	publish(t, repo, aliceDevice, alice, randomKey(t, 32), nil)
+	publish(t, repo, aliceDevice, alice, randomKey(t, signalPublicKeyBytes), nil)
 
 	remaining, err := repo.AvailablePrekeyCount(ctx, aliceDevice)
 	if err != nil {
@@ -276,7 +280,7 @@ func TestRepublishingTheSameIdentityKeepsPrekeys(t *testing.T) {
 
 	owner := createUser(t, db, "owner")
 	device := createDevice(t, db, owner)
-	identity := randomKey(t, 32)
+	identity := randomKey(t, signalPublicKeyBytes)
 
 	publish(t, repo, device, owner, identity, prekeys(t, 1, 4))
 	publish(t, repo, device, owner, identity, prekeys(t, 5, 4))
@@ -299,7 +303,7 @@ func TestBundleIsRefusedForARevokedDevice(t *testing.T) {
 	device := createDevice(t, db, owner)
 	caller := createDevice(t, db, createUser(t, db, "caller"))
 
-	publish(t, repo, device, owner, randomKey(t, 32), prekeys(t, 1, 2))
+	publish(t, repo, device, owner, randomKey(t, signalPublicKeyBytes), prekeys(t, 1, 2))
 
 	if _, err := db.Pool.Exec(ctx,
 		`UPDATE devices SET revoked_at = now() WHERE id = $1`, device); err != nil {
@@ -479,8 +483,123 @@ func TestDeviceOwnerResolvesRealtimeRouting(t *testing.T) {
 	}
 }
 
-// createSecretChat makes a two-member encrypted chat directly, since the
-// messaging module owns chat creation and this suite only needs the row.
+func TestEnsureSecretChatIsIdempotentInBothDirections(t *testing.T) {
+	db := testDB(t)
+	repo := secretchat.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+
+	first, created, err := repo.EnsureSecretChat(ctx, alice, bob)
+	if err != nil {
+		t.Fatalf("EnsureSecretChat: %v", err)
+	}
+	if !created {
+		t.Error("the first call did not report creating the chat")
+	}
+
+	// The same pair named the other way round must land in the same
+	// conversation. If it did not, each party would be typing into a chat the
+	// other never sees.
+	second, created, err := repo.EnsureSecretChat(ctx, bob, alice)
+	if err != nil {
+		t.Fatalf("EnsureSecretChat reversed: %v", err)
+	}
+	if created {
+		t.Error("the reversed call created a second chat")
+	}
+	if second != first {
+		t.Errorf("reversed pair produced chat %s, want %s", second, first)
+	}
+
+	var chatType string
+	var members int
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT c.type, count(m.user_id)::int
+		 FROM chats c JOIN chat_members m ON m.chat_id = c.id
+		 WHERE c.id = $1 GROUP BY c.type`, first).Scan(&chatType, &members); err != nil {
+		t.Fatalf("read the created chat: %v", err)
+	}
+	if chatType != "secret" {
+		t.Errorf("chat type = %q, want secret", chatType)
+	}
+	// A chat of the wrong type is refused by Send, so this is the difference
+	// between a working encrypted conversation and one that rejects everything.
+	if members != 2 {
+		t.Errorf("member count = %d, want 2", members)
+	}
+}
+
+func TestSecretChatWithYourselfIsRefused(t *testing.T) {
+	db := testDB(t)
+	repo := secretchat.NewRepository(db)
+
+	alice := createUser(t, db, "alice")
+
+	if _, _, err := repo.EnsureSecretChat(context.Background(), alice, alice); err == nil {
+		t.Fatal("EnsureSecretChat with oneself succeeded, want a validation error")
+	}
+}
+
+func TestConcurrentOpensShareOneSecretChat(t *testing.T) {
+	// Both devices of a couple can tap "start encrypted chat" at the same
+	// moment. The unique key is what makes that one conversation rather than
+	// two, each holding half the messages.
+	db := testDB(t)
+	repo := secretchat.NewRepository(db)
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+
+	const racers = 8
+	ids := make([]uuid.UUID, racers)
+	errs := make([]error, racers)
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			<-start
+			// Half the callers name the pair the other way round, which is how
+			// it actually happens: each side asks about the other.
+			a, b := alice, bob
+			if slot%2 == 1 {
+				a, b = bob, alice
+			}
+			ids[slot], _, errs[slot] = repo.EnsureSecretChat(context.Background(), a, b)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("racer %d: %v", i, err)
+		}
+	}
+	for i, id := range ids {
+		if id != ids[0] {
+			t.Errorf("racer %d got chat %s, want %s", i, id, ids[0])
+		}
+	}
+
+	var chats int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*)::int FROM secret_chat_keys WHERE $1 IN (user_a_id, user_b_id)`,
+		alice).Scan(&chats); err != nil {
+		t.Fatalf("count secret chats: %v", err)
+	}
+	if chats != 1 {
+		t.Errorf("%d secret chats exist for the pair, want 1", chats)
+	}
+}
+
+// createSecretChat makes a two-member encrypted chat directly. The envelope
+// tests below only need the row, and building it here keeps them independent
+// of the pairing rules that EnsureSecretChat is tested against above.
 func createSecretChat(t *testing.T, db *database.DB, alice, bob uuid.UUID) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()

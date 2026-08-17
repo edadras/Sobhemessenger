@@ -127,16 +127,17 @@ func (r *Repository) EnsurePrivateChat(ctx context.Context, a, b uuid.UUID) (uui
 			return fmt.Errorf("messaging: create private chat: %w", err)
 		}
 
-		_, err := tx.Exec(ctx,
+		// A unique violation is returned untouched so the caller below can
+		// recognise it. It cannot be handled here: PostgreSQL aborts the whole
+		// transaction on the error, and every further statement in it —
+		// including a SELECT to find the winner's row — fails with 25P02 until
+		// it is rolled back. The re-read has to happen after.
+		if _, err := tx.Exec(ctx,
 			`INSERT INTO private_chat_keys (chat_id, user_a_id, user_b_id) VALUES ($1, $2, $3)`,
-			chatID, low, high)
-		if database.IsUniqueViolation(err) {
-			// Someone else created it first; adopt their chat.
-			return tx.QueryRow(ctx,
-				`SELECT chat_id FROM private_chat_keys WHERE user_a_id = $1 AND user_b_id = $2`,
-				low, high).Scan(&chatID)
-		}
-		if err != nil {
+			chatID, low, high); err != nil {
+			if database.IsUniqueViolation(err) {
+				return err
+			}
 			return fmt.Errorf("messaging: link private chat: %w", err)
 		}
 
@@ -152,10 +153,25 @@ func (r *Repository) EnsurePrivateChat(ctx context.Context, a, b uuid.UUID) (uui
 		created = true
 		return nil
 	})
-	if err != nil {
+
+	switch {
+	case err == nil:
+		return chatID, created, nil
+
+	case database.IsUniqueViolation(err):
+		// Someone else created it first. Their row is committed and ours is
+		// rolled back — including the `chats` row this transaction inserted —
+		// so adopt theirs.
+		if err := r.db.Pool.QueryRow(ctx,
+			`SELECT chat_id FROM private_chat_keys WHERE user_a_id = $1 AND user_b_id = $2`,
+			low, high).Scan(&chatID); err != nil {
+			return uuid.Nil, false, fmt.Errorf("messaging: adopt racing private chat: %w", err)
+		}
+		return chatID, false, nil
+
+	default:
 		return uuid.Nil, false, err
 	}
-	return chatID, created, nil
 }
 
 func (r *Repository) ensureSelfChat(ctx context.Context, userID uuid.UUID) (uuid.UUID, bool, error) {

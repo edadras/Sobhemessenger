@@ -383,5 +383,19 @@
   "inlineSearching": "Searching…",
   "inlineNoResults": "That bot found nothing",
   "locationAccuracy": "Accurate to about {metres} m",
-  "locationLiveUntil": "Live until {time}"
+  "locationLiveUntil": "Live until {time}",
+  "secretChatTitle": "Encrypted chat",
+  "secretChatStart": "Start an encrypted chat",
+  "secretChatComposeHint": "Encrypted message",
+  "secretChatEmptyTitle": "No messages yet",
+  "secretChatEmptyBody": "Messages in this conversation are encrypted on this device, and only your contact's device can open them.",
+  "secretChatEphemeralNotice": "Opened messages are not saved on this device and are gone when you close the app.",
+  "secretChatSetupFailed": "This device could not be set up for encrypted chats.",
+  "secretChatNoDevices": "This person has no device set up for encrypted chats.",
+  "secretChatSendFailed": "Not sent",
+  "secretChatVerify": "Check the safety number",
+  "safetyNumberTitle": "Safety number",
+  "safetyNumberExplain": "Compare this number with your contact outside this app — in person or over a voice call. If both match, nobody is in the middle.",
+  "safetyNumberDevice": "Device {index} of {total}",
+  "safetyNumberUnknown": "A safety number only exists once a message has passed between you."
 }

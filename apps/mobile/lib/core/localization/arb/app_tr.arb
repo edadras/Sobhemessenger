@@ -383,5 +383,19 @@
   "inlineSearching": "Aranıyor…",
   "inlineNoResults": "Bu bot bir şey bulamadı",
   "locationAccuracy": "Yaklaşık {metres} m doğrulukta",
-  "locationLiveUntil": "{time} saatine kadar canlı"
+  "locationLiveUntil": "{time} saatine kadar canlı",
+  "secretChatTitle": "Şifreli sohbet",
+  "secretChatStart": "Şifreli sohbet başlat",
+  "secretChatComposeHint": "Şifreli mesaj",
+  "secretChatEmptyTitle": "Henüz mesaj yok",
+  "secretChatEmptyBody": "Bu sohbetteki mesajlar bu cihazda şifrelenir ve yalnızca kişinin cihazı açabilir.",
+  "secretChatEphemeralNotice": "Açılan mesajlar bu cihaza kaydedilmez; uygulamayı kapattığınızda kaybolur.",
+  "secretChatSetupFailed": "Bu cihaz şifreli sohbetler için hazırlanamadı.",
+  "secretChatNoDevices": "Bu kişinin şifreli sohbete hazır bir cihazı yok.",
+  "secretChatSendFailed": "Gönderilemedi",
+  "secretChatVerify": "Güvenlik numarasını doğrula",
+  "safetyNumberTitle": "Güvenlik numarası",
+  "safetyNumberExplain": "Bu numarayı kişiyle bu uygulamanın dışında karşılaştırın — yüz yüze ya da sesli aramayla. İkisi de aynıysa aranızda kimse yok demektir.",
+  "safetyNumberDevice": "Cihaz {index}/{total}",
+  "safetyNumberUnknown": "Güvenlik numarası ancak aranızda bir mesaj geçtikten sonra oluşur."
 }

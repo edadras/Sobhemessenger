@@ -68,6 +68,14 @@ dependencies:
   intl: ^0.19.0
   uuid: ^4.5.1
   collection: ^1.19.1
+  # Secret chats (§24). X3DH and the Double Ratchet are performed here, on the
+  # device — the server only ever holds public key material and opaque
+  # ciphertext. §84.16-17 forbid inventing or hand-rolling this, so it is a
+  # port of Signal's own library rather than an assembly of primitives.
+  #
+  # Licence: GPL-3.0 (libsignal_protocol_dart), as recorded in
+  # docs/security/third-party-licences.md per §84.19.
+  libsignal_protocol_dart: ^0.8.2
 
 dev_dependencies:
   flutter_test:

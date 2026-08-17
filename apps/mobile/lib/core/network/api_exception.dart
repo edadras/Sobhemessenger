@@ -30,6 +30,10 @@ abstract final class ApiErrorCode {
   static const String permissionDenied = 'CHAT_PERMISSION_DENIED';
   static const String slowMode = 'SLOW_MODE_ACTIVE';
 
+  /// The generic not-found code, used where a resource has no more specific
+  /// one — a user with no encrypted-chat devices, for instance.
+  static const String notFound = 'NOT_FOUND';
+
   static const String rateLimited = 'RATE_LIMITED';
   static const String validationFailed = 'VALIDATION_FAILED';
   static const String featureDisabled = 'FEATURE_DISABLED';

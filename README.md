@@ -167,7 +167,8 @@ tests.
 | **Infrastructure** | Docker Compose dev stack, distroless image, nginx edge config, Prometheus alerts derived from the §79 targets, Grafana provisioning, Kubernetes manifests with PDB/HPA/NetworkPolicy and backup CronJobs, encrypted backup and verified restore scripts, CI with lint, tests, reversible-migration check and image scanning. |
 | **Protocol** | OpenAPI 3.1 covering every served endpoint, and a full WebSocket protocol document. A test walks the real router in both directions, so an undocumented route and a documented route that does not exist both fail the build. |
 | **Contacts** | Discovery by HMAC digest under a server-published pepper — a phone number never leaves the device — with full and incremental sync, favourites, blocking in both directions, and privacy resolved per viewer in SQL. |
-| **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. |
+| **Secret chats** | The server's half of §24: a key directory and a mailbox. Prekeys are handed out exactly once under `FOR UPDATE SKIP LOCKED`, identity rotation clears stale keys and sessions, and acknowledged ciphertext is deleted rather than flagged. Opening an encrypted chat is idempotent on an ordered pair, so two devices racing land in one conversation. |
+| **Secret chats on the device** | X3DH and the Double Ratchet through `libsignal_protocol_dart` (GPL-3.0, recorded per §84.19) — no construction is invented (§84.16–17). Private keys and ratchet state live in the iOS keychain and the Android keystore; the identity is generated once and published at launch so the device is reachable; prekeys top up when the server says they are low. Safety numbers are shown per device for out-of-band comparison, and signing out wipes every key. |
 | **Flutter** | Clean-architecture foundation, design tokens, four locales with correct RTL, envelope-aware client with collapsed token refresh, WebSocket client with jittered backoff, Drift schema with a real offline outbox. Five-tab shell with per-tab navigation stacks; chats with media, voice notes and polls; contacts; groups and channels with member administration, invite links and join requests; stories with a composer and viewer; WebRTC calls; communities; the news feed with articles and bookmarks; search; notifications; profile and settings. |
 | **Mobile media** | Presigned multipart upload straight to object storage, images with reserved aspect ratio, video posters, voice notes recorded in Opus and drawn with the server's waveform, and a readiness gate so nothing renders before it is scanned and processed. |
 | **Mobile identity** | Editing the profile with partial updates, and claiming a username with availability checked as you type and the 30-day release hold explained before you rename rather than after. |
@@ -279,9 +280,14 @@ row in `messages` keeps meaning "in the conversation".
 
 ### Still not built
 
-**Secret chats on the device (§24).** The server half is complete. X3DH and
-the Double Ratchet belong on the device and will use a reviewed implementation
-rather than a hand-rolled one (§84.16–17), so this waits on choosing one.
+**A local store for encrypted history.** Secret chats work end to end, but the
+decrypted text lives in memory for as long as the conversation is open and
+nowhere else — closing the app loses the history. The local Drift database is
+not encrypted at rest, and writing plaintext into it would move the message from
+a place the operating system protects to a file any process with storage access
+can read. Keeping history without giving that up means an encrypted local store
+(SQLCipher under Drift, keyed from the platform keystore), which is a change to
+the whole local database rather than to this one feature.
 
 **Load testing at scale (§22).** The harness implements the §78 ramp to 500k
 concurrent, but running it needs a deployed cluster. What is measured above is
@@ -294,10 +300,17 @@ a single process: it bounds latency, not capacity.
 | Document | Contents |
 |---|---|
 | `docs/protocol/websocket.md` | Frame format, events, sync, reconnection, scaling |
-| `protocol/rest/openapi.yaml` | REST contract: all 138 endpoints, kept in step with the router by a test |
-| `docs/architecture/` | System design, database model, sync model, roadmap |
-| `docs/security/` | Threat model and security controls |
-| `docs/deployment/` | Deployment, backup and disaster recovery |
+| `protocol/rest/openapi.yaml` | REST contract: all 180 operations across 147 paths, kept in step with the router by a test |
+| `docs/architecture/roadmap.md` | Per-stage delivery status, and the trade-offs taken deliberately |
+| `docs/security/third-party-licences.md` | Every direct dependency and its licence (§84.19), including the one that constrains distribution |
+
+Not yet written: a threat model, a deployment and disaster-recovery guide, and
+prose descriptions of the database and sync models. The systems themselves are
+built and covered by tests — `scripts/backup.sh` and `scripts/restore.sh` are
+the working procedures, `infrastructure/kubernetes/` the manifests, and
+`docs/protocol/websocket.md` describes the sync protocol — but the explanatory
+documents do not exist, and an earlier version of this table listed them as
+though they did.
 
 ---
 

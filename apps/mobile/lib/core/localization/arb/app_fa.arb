@@ -418,5 +418,29 @@
         "type": "String"
       }
     }
-  }
+  },
+  "secretChatTitle": "گفت‌وگوی رمزنگاری‌شده",
+  "secretChatStart": "شروع گفت‌وگوی رمزنگاری‌شده",
+  "secretChatComposeHint": "پیام رمزنگاری‌شده",
+  "secretChatEmptyTitle": "هنوز پیامی نیست",
+  "secretChatEmptyBody": "پیام‌های این گفت‌وگو روی همین دستگاه رمزنگاری می‌شوند و فقط دستگاه مخاطب می‌تواند آن‌ها را باز کند.",
+  "secretChatEphemeralNotice": "پیام‌های باز‌شده روی این دستگاه ذخیره نمی‌شوند و با بستن برنامه پاک می‌شوند.",
+  "secretChatSetupFailed": "آماده‌سازی گفت‌وگوی رمزنگاری‌شده روی این دستگاه انجام نشد.",
+  "secretChatNoDevices": "این کاربر هیچ دستگاهی برای گفت‌وگوی رمزنگاری‌شده ندارد.",
+  "secretChatSendFailed": "ارسال نشد",
+  "secretChatVerify": "بررسی شماره امنیتی",
+  "safetyNumberTitle": "شماره امنیتی",
+  "safetyNumberExplain": "این شماره را با مخاطب‌تان بیرون از این برنامه — حضوری یا با تماس صوتی — مقایسه کنید. اگر هر دو یکسان بود، هیچ‌کس میان شما نیست.",
+  "safetyNumberDevice": "دستگاه {index} از {total}",
+  "@safetyNumberDevice": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "safetyNumberUnknown": "تا وقتی پیامی رد و بدل نشده باشد، شماره امنیتی ساخته نمی‌شود."
 }

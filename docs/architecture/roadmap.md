@@ -50,16 +50,50 @@ A feature is complete only when all of the following hold:
 | 24 | Bots — registration, tokens, updates, webhooks | done: @sobhfather_bot as a real conversational BotFather, hashed tokens, durable update queue, signed webhooks, inline keyboards, callback queries and inline mode |
 | 25 | Stickers and link previews | done: sets with per-user installation, OpenGraph unfurling behind the SSRF guard |
 | 26 | Location and contact messages | done: fixed points, venues, live location with server-computed expiry, contact cards |
+| 27 | Secret chats end to end (§24) | done: X3DH and the Double Ratchet on the device through a reviewed library, keys in the platform keystore, safety numbers per device; history is not persisted — see below |
 
 ## Secret chats (§24)
 
-The server half is built: a key directory and a mailbox. It publishes public
-key material, hands out each one-time prekey exactly once, and stores opaque
-ciphertext until the recipient acknowledges it.
+Both halves are built.
 
-The client half — X3DH and the Double Ratchet — is deliberately not on the
-server and is not yet written on the device. Per §84 rules 16 and 17 it will
-use a reviewed implementation rather than a hand-rolled one.
+**The server** is a key directory and a mailbox. It publishes public key
+material, hands out each one-time prekey exactly once, and stores opaque
+ciphertext until the recipient acknowledges it — at which point it is deleted
+rather than flagged. `POST /api/v1/secret/chats` opens the conversation itself,
+idempotently on an ordered pair of users, so two devices racing to start one
+land in a single chat. Nothing on the server parses, transforms or inspects a
+payload.
+
+**The device** performs X3DH and the Double Ratchet through
+`libsignal_protocol_dart`, a port of Signal's own library (GPL-3.0, recorded
+per §84.19). §84 rules 16 and 17 forbid inventing or assembling the
+construction, so the app supplies transport, storage and identity and does no
+cryptography of its own. Private keys and ratchet state are held in the iOS
+keychain and the Android keystore, never in the message database. The identity
+is generated once and published at every launch — a device whose keys were
+never published cannot be reached, and nobody can be asked to wait for it to
+come online — and one-time prekeys top up when the server reports them low.
+
+Safety numbers are derived from both identity keys and shown per device, since
+that is what they are computed against: a person with a phone and a tablet has
+two, and a number that matched for one says nothing about the other. Signing
+out wipes every key and session, so that it is a boundary rather than a screen.
+
+### The trade-off that is deliberate
+
+Decrypted text is held in memory while a conversation is open, and nowhere
+else. Closing the app loses the history.
+
+Every other conversation in SOBH is offline-first, backed by the local Drift
+database. That database is not encrypted at rest. Writing secret-chat plaintext
+into it would move the message from a place the operating system protects to a
+file any process with storage access can read, and the encryption would then
+only be guarding the part of the journey that was already safe.
+
+Keeping history without giving that up needs an encrypted local store —
+SQLCipher under Drift, keyed from the platform keystore. That is a change to
+the whole local database rather than to this feature, and it is listed under
+what is left rather than half-implemented here.
 
 ## What is left
 
@@ -71,9 +105,9 @@ impossible threshold was used to confirm a breach really does fail the run.
 Reaching the 500k stage needs a deployed cluster and load generators, which is
 a capacity question rather than a code one.
 
-**Secret chats on the device.** The server half is complete: a key directory
-that hands out each one-time prekey once, and a mailbox that deletes ciphertext
-on acknowledgement. X3DH and the Double Ratchet belong on the device, and §84
-rules 16 and 17 require a reviewed implementation rather than a hand-rolled
-one, so this waits on adopting a vetted library rather than on writing more
-protocol code.
+**An encrypted local store.** Secret chats work end to end, but their history
+is not kept on the device — see the trade-off recorded above. Adding SQLCipher
+under Drift, keyed from the platform keystore, would let encrypted
+conversations persist on the same terms as every other one. It touches the
+whole local database, including a migration path for existing installs, so it
+is its own piece of work.

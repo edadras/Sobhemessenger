@@ -835,6 +835,53 @@ paths:
         "200": { description: Unblocked }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/secret/chats:
+    post:
+      tags: [Secret chats]
+      summary: Open the encrypted chat with a user
+      description: |
+        Returns the existing encrypted chat with that person or creates one, so
+        calling it twice is safe and two devices racing land in one
+        conversation rather than two.
+
+        The peer must have at least one device that has published key material.
+        A chat with someone who has none is refused rather than created: nothing
+        sent into it could be encrypted to anybody, and a conversation that
+        silently rejects every message is worse than a clear error.
+
+        This is the only way to obtain a chat of type `secret`, which
+        `POST /api/v1/secret/messages` requires (§24).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The encrypted chat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          chat_id: { type: string, format: uuid }
+                          created:
+                            type: boolean
+                            description: |
+                              False when the chat already existed, so the caller
+                              can tell a new conversation from an old one
+                              without a second request.
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
   /api/v1/secret/keys:
     post:
       tags: [Secret chats]
@@ -850,15 +897,34 @@ paths:
           application/json:
             schema:
               type: object
-              required: [registration_id, identity_key, signed_prekey, prekey_signature]
+              required:
+                [
+                  registration_id,
+                  identity_key,
+                  signed_prekey_id,
+                  signed_prekey,
+                  prekey_signature,
+                ]
               properties:
                 registration_id: { type: integer, minimum: 1 }
                 identity_key:
                   type: string
-                  description: Base64, decoding to 32 bytes
+                  description: |
+                    Base64, decoding to 33 bytes: a one-byte curve identifier
+                    followed by the 32-byte Curve25519 key. This is the Signal
+                    wire format, not 32 plus a mistake.
+                signed_prekey_id:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    Which signed prekey this bundle carries. A session initiator
+                    quotes it back and the recipient looks it up to derive the
+                    same secret, so without it the first message of every
+                    conversation fails to decrypt. Rotating means publishing a
+                    new id alongside the new key.
                 signed_prekey:
                   type: string
-                  description: Base64, decoding to 32 bytes
+                  description: Base64, decoding to 33 bytes
                 prekey_signature:
                   type: string
                   description: Base64, decoding to 64 bytes
@@ -869,7 +935,7 @@ paths:
                     type: object
                     properties:
                       key_id: { type: integer }
-                      public_key: { type: string, description: Base64, decoding to 32 bytes }
+                      public_key: { type: string, description: Base64, decoding to 33 bytes }
       responses:
         "200": { description: Published }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -4840,6 +4906,11 @@ components:
         user_id: { type: string, format: uuid }
         registration_id: { type: integer }
         identity_key: { type: string, description: Base64 }
+        signed_prekey_id:
+          type: integer
+          description: |
+            Names which signed prekey the bundle carries, so the initiator can
+            quote it back and the recipient can look it up.
         signed_prekey: { type: string, description: Base64 }
         prekey_signature: { type: string, description: Base64 }
         one_time_prekey:
