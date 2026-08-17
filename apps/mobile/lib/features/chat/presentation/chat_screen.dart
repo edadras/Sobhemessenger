@@ -62,6 +62,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// not ask for the same nothing on every scroll.
   bool _moreHistory = true;
 
+  /// How far the read cursor has been pushed, so scrolling does not send the
+  /// same acknowledgement repeatedly.
+  int _markedReadUpTo = 0;
+
+  bool _typing = false;
+  Timer? _typingStopTimer;
+
+  /// How long a pause counts as having stopped typing.
+  static const Duration _typingIdle = Duration(seconds: 3);
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +80,61 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // silently fills in when the network returns.
     unawaited(_loadHistory());
     _scrollController.addListener(_onScroll);
+    _composer.addListener(_onComposerChanged);
+  }
+
+  /// Tells the other side the user is typing, and stops saying so once they
+  /// pause.
+  ///
+  /// Rate-limited to one "started" per interval rather than one request per
+  /// keystroke, which would be a request per character typed. The stop is on a
+  /// timer because there is no keystroke to hang it off — someone who stops
+  /// typing sends nothing at all.
+  void _onComposerChanged() {
+    _typingStopTimer?.cancel();
+
+    if (_composer.text.trim().isEmpty) {
+      _setTyping(false);
+      return;
+    }
+
+    _setTyping(true);
+    _typingStopTimer = Timer(_typingIdle, () => _setTyping(false));
+  }
+
+  void _setTyping(bool typing) {
+    if (_typing == typing) {
+      return;
+    }
+    _typing = typing;
+    unawaited(
+      ref.read(chatRepositoryProvider).setTyping(widget.chatId, typing: typing),
+    );
+  }
+
+  /// Marks everything on screen as read.
+  ///
+  /// Without this the unread badge never clears — it is server-side state, and
+  /// no amount of looking at the conversation changes it on its own. Called on
+  /// open and whenever new messages arrive while the screen is up, because a
+  /// message read as it lands is still read.
+  Future<void> _markRead(List<MessageRow> messages) async {
+    final int highest = messages
+        .map((MessageRow row) => row.seq)
+        .whereType<int>()
+        .fold<int>(0, (int a, int b) => a > b ? a : b);
+    if (highest <= _markedReadUpTo) {
+      return;
+    }
+    _markedReadUpTo = highest;
+
+    try {
+      await ref.read(chatRepositoryProvider).markRead(widget.chatId, highest);
+    } on ApiException {
+      // Offline. The badge clears on the next open once the request lands, and
+      // an error over a conversation the user is reading would be noise.
+      _markedReadUpTo = 0;
+    }
   }
 
   void _onScroll() {
@@ -113,6 +178,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _typingStopTimer?.cancel();
+    // Leaving the screen mid-sentence must clear the indicator, or the other
+    // person is told someone is typing who has closed the conversation.
+    if (_typing) {
+      unawaited(
+        ref.read(chatRepositoryProvider).setTyping(widget.chatId, typing: false),
+      );
+    }
+    _composer.removeListener(_onComposerChanged);
     _composer.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -354,6 +428,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       chatMessagesProvider(widget.chatId),
     );
     final String? currentUserId = ref.watch(sessionControllerProvider).userId;
+
+    // Reading is acknowledged whenever the conversation changes underneath the
+    // screen, which covers both opening it and a message arriving while it is
+    // open. Deferred past this frame because it writes to the database the
+    // build is reading from.
+    messages.whenData((List<MessageRow> rows) {
+      if (rows.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            unawaited(_markRead(rows));
+          }
+        });
+      }
+    });
 
     return Scaffold(
       backgroundColor: palette.chatBackground,

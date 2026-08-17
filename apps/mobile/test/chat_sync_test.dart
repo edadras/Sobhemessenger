@@ -111,6 +111,75 @@ void main() {
     });
   });
 
+  group('markChatRead', () {
+    test('clears the unread badge', () async {
+      // Without this the badge never goes: the count is server-side state that
+      // looking at the conversation does not change on its own.
+      await db.upsertChats(<ChatsCompanion>[_chat('c1', unread: 7)]);
+
+      await db.markChatRead('c1', 42);
+
+      final ChatRow row = (await db.watchChats().first).single;
+      expect(row.unreadCount, 0);
+      expect(row.mentionCount, 0);
+      expect(row.lastReadSeq, 42);
+    });
+
+    test('leaves other chats alone', () async {
+      await db.upsertChats(<ChatsCompanion>[
+        _chat('c1', unread: 3),
+        _chat('c2', unread: 5),
+      ]);
+
+      await db.markChatRead('c1', 10);
+
+      final List<ChatRow> rows = await db.watchChats().first;
+      final ChatRow other = rows.firstWhere((ChatRow r) => r.id == 'c2');
+      expect(other.unreadCount, 5);
+    });
+
+    test('a later refresh does not resurrect the count', () async {
+      // The server is told before the local row is written, so by the time the
+      // next chat-list sync runs the server already agrees it is read. This
+      // pins the ordering that makes that true.
+      await db.upsertChats(<ChatsCompanion>[_chat('c1', unread: 4)]);
+      await db.markChatRead('c1', 12);
+
+      // What the server would now return for that chat.
+      await db.upsertChats(<ChatsCompanion>[_chat('c1', unread: 0)]);
+
+      expect((await db.watchChats().first).single.unreadCount, 0);
+    });
+  });
+
+  group('applyEdit', () {
+    test('replaces the text and records when it was edited', () async {
+      // The chat has to exist first: messages carry a real foreign key to it,
+      // which is what makes leaving a conversation take its messages with it.
+      await db.upsertChats(<ChatsCompanion>[_chat('c1')]);
+      await db.upsertMessage(
+        MessagesCompanion.insert(
+          id: 'm1',
+          chatId: 'c1',
+          clientMessageId: 'cm1',
+          status: MessageStatus.sent,
+          content: const Value<String>('before'),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+
+      final DateTime at = DateTime.utc(2026, 1, 2);
+      await db.applyEdit('m1', content: 'after', editedAt: at);
+
+      final MessageRow row = (await db.watchMessages('c1').first).single;
+      expect(row.content, 'after');
+      // Compared as an instant rather than for equality: the column stores a
+      // Unix timestamp, so what comes back is the same moment expressed in the
+      // device's local zone, not the UTC value that went in.
+      expect(row.editedAt!.isAtSameMomentAs(at), isTrue);
+    });
+  });
+
   group('schema', () {
     test('is at the version the peer columns were added in', () async {
       // The columns are added by an upgrade step rather than a rebuild, so the

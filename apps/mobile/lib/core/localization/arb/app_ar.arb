@@ -397,5 +397,9 @@
   "safetyNumberTitle": "رقم الأمان",
   "safetyNumberExplain": "قارن هذا الرقم مع مُراسلك خارج هذا التطبيق — وجهًا لوجه أو عبر مكالمة صوتية. إذا تطابق الرقمان فلا أحد بينكما.",
   "safetyNumberDevice": "الجهاز {index} من {total}",
-  "safetyNumberUnknown": "لا يوجد رقم أمان قبل تبادل رسالة واحدة على الأقل."
+  "safetyNumberUnknown": "لا يوجد رقم أمان قبل تبادل رسالة واحدة على الأقل.",
+  "chatEditMessage": "تعديل الرسالة",
+  "chatDeleteMessage": "حذف الرسالة",
+  "chatDeleteConfirm": "ستُحذف هذه الرسالة لدى الجميع، ولا يمكن التراجع عن ذلك.",
+  "chatReact": "تفاعل"
 }

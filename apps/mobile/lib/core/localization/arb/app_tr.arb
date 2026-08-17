@@ -397,5 +397,9 @@
   "safetyNumberTitle": "Güvenlik numarası",
   "safetyNumberExplain": "Bu numarayı kişiyle bu uygulamanın dışında karşılaştırın — yüz yüze ya da sesli aramayla. İkisi de aynıysa aranızda kimse yok demektir.",
   "safetyNumberDevice": "Cihaz {index}/{total}",
-  "safetyNumberUnknown": "Güvenlik numarası ancak aranızda bir mesaj geçtikten sonra oluşur."
+  "safetyNumberUnknown": "Güvenlik numarası ancak aranızda bir mesaj geçtikten sonra oluşur.",
+  "chatEditMessage": "Mesajı düzenle",
+  "chatDeleteMessage": "Mesajı sil",
+  "chatDeleteConfirm": "Bu mesaj herkes için silinecek. Bu işlem geri alınamaz.",
+  "chatReact": "Tepki ver"
 }

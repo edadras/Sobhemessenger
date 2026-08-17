@@ -397,5 +397,9 @@
   "safetyNumberTitle": "Safety number",
   "safetyNumberExplain": "Compare this number with your contact outside this app — in person or over a voice call. If both match, nobody is in the middle.",
   "safetyNumberDevice": "Device {index} of {total}",
-  "safetyNumberUnknown": "A safety number only exists once a message has passed between you."
+  "safetyNumberUnknown": "A safety number only exists once a message has passed between you.",
+  "chatEditMessage": "Edit message",
+  "chatDeleteMessage": "Delete message",
+  "chatDeleteConfirm": "This message will be deleted for everyone. This cannot be undone.",
+  "chatReact": "React"
 }

@@ -144,6 +144,86 @@ class ChatRepository {
     }
   }
 
+  /// Marks everything up to [seq] as read.
+  ///
+  /// Without this the unread badge never clears: it is server-side state, and
+  /// the count on the chat list comes back from the server on every refresh.
+  /// The local row is updated too so the badge goes at once rather than at the
+  /// next sync.
+  ///
+  /// The cursor only moves forward. The server enforces that as well, but
+  /// checking here avoids a pointless request every time an older message is
+  /// scrolled past.
+  Future<void> markRead(String chatId, int seq) async {
+    final ChatRow? chat = await _db.chatById(chatId);
+    if (chat != null && seq <= chat.lastReadSeq) {
+      return;
+    }
+
+    await _api.post<Map<String, dynamic>>(
+      '/chats/$chatId/read',
+      body: <String, dynamic>{'seq': seq},
+    );
+    await _db.markChatRead(chatId, seq);
+  }
+
+  /// Tells the other side whether the user is typing.
+  ///
+  /// Deliberately fire-and-forget and never retried: a typing indicator that
+  /// arrives late is worse than one that never arrives, and it is not worth an
+  /// error in front of someone who is mid-sentence.
+  Future<void> setTyping(String chatId, {required bool typing}) async {
+    try {
+      await _api.post<Map<String, dynamic>>(
+        '/chats/$chatId/typing',
+        body: <String, dynamic>{'typing': typing},
+      );
+    } on ApiException {
+      // Nothing to tell the user and nothing they could do.
+    }
+  }
+
+  /// Edits a sent message.
+  ///
+  /// The server owns the edit window and permissions, so a refusal comes back
+  /// as an ApiException for the caller to show. The local copy is updated only
+  /// once the server has accepted it — showing the new text and then reverting
+  /// it would be worse than a moment's delay.
+  Future<void> editMessage(String messageId, String content) async {
+    final Map<String, dynamic> updated =
+        await _api.patch<Map<String, dynamic>>(
+      '/messages/$messageId',
+      body: <String, dynamic>{'content': content},
+    );
+    await _db.applyEdit(
+      messageId,
+      content: updated['content'] as String? ?? content,
+      editedAt: updated['edited_at'] == null
+          ? DateTime.now()
+          : DateTime.parse(updated['edited_at'] as String).toLocal(),
+    );
+  }
+
+  /// Deletes a sent message.
+  ///
+  /// Kept as a tombstone locally rather than removed, so the conversation shows
+  /// that something was deleted instead of silently closing the gap — which is
+  /// also what the server broadcasts to everyone else.
+  Future<void> deleteMessage(String messageId) async {
+    await _api.delete<Map<String, dynamic>>('/messages/$messageId');
+    await _db.markMessageDeleted(messageId);
+  }
+
+  /// Adds or removes a reaction. The server decides which, since tapping the
+  /// same emoji twice removes it; the response says what happened.
+  Future<bool> react(String messageId, String emoji) async {
+    final Map<String, dynamic> result = await _api.post<Map<String, dynamic>>(
+      '/messages/$messageId/reactions',
+      body: <String, dynamic>{'emoji': emoji},
+    );
+    return result['added'] as bool? ?? false;
+  }
+
   /// Queues a message. Returns as soon as it is stored locally — the UI never
   /// waits on the network to show what the user just typed.
   Future<String> sendText({

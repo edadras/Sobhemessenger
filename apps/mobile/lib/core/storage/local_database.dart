@@ -282,6 +282,42 @@ class LocalDatabase extends _$LocalDatabase {
         .write(MessagesCompanion(deletedAt: Value<DateTime>(DateTime.now())));
   }
 
+  /// Applies an edit the server has accepted.
+  Future<void> applyEdit(
+    String messageId, {
+    required String content,
+    required DateTime editedAt,
+  }) {
+    return (update(messages)
+          ..where(($MessagesTable t) => t.id.equals(messageId)))
+        .write(
+      MessagesCompanion(
+        content: Value<String>(content),
+        editedAt: Value<DateTime>(editedAt),
+      ),
+    );
+  }
+
+  /// One chat, or null if this device has not seen it.
+  Future<ChatRow?> chatById(String chatId) =>
+      (select(chats)..where(($ChatsTable t) => t.id.equals(chatId)))
+          .getSingleOrNull();
+
+  /// Clears the unread badge locally, without waiting for the next sync.
+  ///
+  /// The counter is set to zero rather than decremented: the read cursor moving
+  /// to [seq] means everything up to it has been read, and arithmetic on a
+  /// count that the server also owns would drift.
+  Future<void> markChatRead(String chatId, int seq) {
+    return (update(chats)..where(($ChatsTable t) => t.id.equals(chatId))).write(
+      ChatsCompanion(
+        lastReadSeq: Value<int>(seq),
+        unreadCount: const Value<int>(0),
+        mentionCount: const Value<int>(0),
+      ),
+    );
+  }
+
   Future<void> markMessagePinned(String messageId, bool pinned) {
     return (update(messages)
           ..where(($MessagesTable t) => t.id.equals(messageId)))
