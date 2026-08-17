@@ -152,7 +152,7 @@ tests.
 | **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
 | **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
-| **Messaging** | Chats and membership, permissions with per-member overrides, send/edit/delete/react/read/pin/draft, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows. |
+| **Messaging** | Chats and membership, permissions with per-member overrides, send/edit/delete/react/read/draft, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows. |
 | **Realtime** | WebSocket with authenticated handshake, protocol versioning, heartbeats, ack correlation, resume-from-cursor, slow-consumer eviction, cross-node routing, presence. |
 | **Media** | Resumable presigned multipart uploads, magic-byte validation against the declared MIME, ClamAV scanning, image variants with BlurHash, ffmpeg video renditions and posters, Opus normalisation and waveforms for voice. |
 | **Groups & channels** | Creation, roles with per-member overrides, ownership transfer, rank-checked member administration, invite links with limits and expiry, join requests, distinct-viewer counting, per-post statistics, public directory. |
@@ -197,13 +197,35 @@ deliberately impossible target and confirming it fails.
 
 ### Not yet built
 
-- **Load testing at scale (§22)** — the harness implements the §78 ramp to
-  500k concurrent, but running it needs a deployed cluster. What is measured
-  above is a single process: it bounds latency, not capacity.
-- **Secret chats on the device (§24)** — the server half is complete. X3DH and
-  the Double Ratchet belong on the device and will use a reviewed
-  implementation rather than a hand-rolled one (§84.16–17), so this waits on
-  choosing one.
+**No bot platform.** There is no BotFather equivalent, no bot token issuance,
+no bot API, no webhooks and no inline queries. `users.is_bot` exists as a
+column and the admin panel displays it, but nothing writes it: an account
+cannot currently be created as a bot, and third parties cannot add bots to the
+platform. This is a whole subsystem, not a missing endpoint.
+
+**Schema exists, behaviour does not.** These were modelled in the database so
+that adding them later needs no migration, but they have no endpoint and no
+UI. The columns are inert today:
+
+| Feature | What exists | What is missing |
+|---|---|---|
+| Forwarding | `forward_from_*` columns, rendered in responses | The forward endpoint |
+| Scheduled messages | `scheduled_at` column and partial index | Scheduling and the publisher |
+| Pinned messages | `is_pinned`, `SetPinned` in the repository, the `pin_messages` permission | The HTTP route |
+| Stickers and GIFs | Media kinds, message types, `send_stickers` permission, `sticker_set` on groups | Sticker set management and a picker |
+| Location and contact messages | Both in the message-type constraint | Composing and rendering them |
+| Usernames | Unique index, the column, search by it | Claiming and changing one |
+| Profile editing | `user_profiles` with every field | The endpoint — the app shows the device name because of this |
+| Archived and pinned chats | `is_archived`, `is_pinned` on `chat_members` | The endpoints |
+| Link previews | The `embed_links` permission | Unfurling |
+
+**Secret chats on the device (§24).** The server half is complete. X3DH and
+the Double Ratchet belong on the device and will use a reviewed implementation
+rather than a hand-rolled one (§84.16–17), so this waits on choosing one.
+
+**Load testing at scale (§22).** The harness implements the §78 ramp to 500k
+concurrent, but running it needs a deployed cluster. What is measured above is
+a single process: it bounds latency, not capacity.
 
 `docs/architecture/roadmap.md` carries the per-stage detail.
 
