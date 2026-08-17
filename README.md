@@ -190,9 +190,12 @@ REST and WebSocket traffic with think time.
 
 | Path | End-to-end suite | k6 smoke | Budget (§79) |
 |---|---|---|---|
-| Message send (HTTP) | 57 ms | 5 ms | 200 ms |
-| Send ack | 4 ms | 6 ms | 300 ms |
-| Delivery to recipient | 4 ms | 4 ms | 500 ms |
+| Message send (HTTP) | 57 ms | 6 ms | 200 ms |
+| Send ack | 4 ms | 7 ms | 300 ms |
+| Delivery to recipient | 4 ms | 5 ms | 500 ms |
+
+Re-measured after the bot platform, the scheduling rework and migration 0011,
+so the figures describe the code in this branch rather than an earlier one.
 
 Both assert rather than report: the suite fails the build on a regression, and
 k6 exits 99 when a threshold is crossed — verified by running it against a
