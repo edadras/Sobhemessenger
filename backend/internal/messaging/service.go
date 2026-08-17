@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -165,10 +166,78 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 	})
 
 	s.notifyObservers(ctx, chatCtx, result.Message)
+	s.indexForSearch(ctx, chatCtx, result.Message)
 
 	s.metrics.MessagesSent.WithLabelValues(chatCtx.ChatType, in.Type).Inc()
 	s.metrics.MessageSendLatency.Observe(time.Since(start).Seconds())
 	return result.Message, nil
+}
+
+// indexForSearch queues a message for the search index (§26).
+//
+// Queued rather than written here: indexing is not part of delivering a
+// message, and a search cluster that is slow or down must not slow down or fail
+// a send. The job is durable, so an index that was unreachable catches up
+// rather than losing the message from search for ever.
+//
+// Nothing from an encrypted chat is ever indexed — the server has not seen the
+// text and never will (§24, §61). The chat-type guard on sending already makes
+// this unreachable; it is repeated because "the other check covers it" is how a
+// leak survives a refactor.
+func (s *Service) indexForSearch(ctx context.Context, chatCtx *ChatContext, message *Message) {
+	if chatCtx.ChatType == ChatSecret || message.Content == "" {
+		return
+	}
+	// The deduplication key names the operation and the version of the text.
+	//
+	// PublishJob suppresses a repeated key inside JetStream's duplicate window,
+	// which is what makes a retried publish harmless — but it also means two
+	// different jobs sharing a key silently become one. An edit must not be
+	// mistaken for a repeat of the original send, so the edit timestamp is part
+	// of the key.
+	version := int64(0)
+	if message.EditedAt != nil {
+		version = message.EditedAt.UnixNano()
+	}
+	s.enqueueIndex(ctx, fmt.Sprintf("message-index-%s-%d", message.ID, version), message.ID,
+		map[string]any{
+			"index":       "messages",
+			"document_id": message.ID.String(),
+			"document": map[string]any{
+				"id":         message.ID,
+				"chat_id":    message.ChatID,
+				"sender_id":  message.SenderID,
+				"content":    message.Content,
+				"seq":        message.Seq,
+				"created_at": message.CreatedAt,
+			},
+		})
+}
+
+// removeFromSearch takes a message out of the index.
+//
+// A deleted message that stays searchable is a deletion that did not happen as
+// far as the person who asked for it is concerned.
+func (s *Service) removeFromSearch(ctx context.Context, messageID uuid.UUID) {
+	// A different key from any index job for the same message: sharing one
+	// would let the removal be swallowed as a duplicate of the send, leaving a
+	// deleted message searchable for ever.
+	s.enqueueIndex(ctx, "message-delete-"+messageID.String(), messageID,
+		map[string]any{
+			"index":       "messages",
+			"document_id": messageID.String(),
+			"delete":      true,
+		})
+}
+
+func (s *Service) enqueueIndex(ctx context.Context, dedupeID string, messageID uuid.UUID, payload map[string]any) {
+	if err := s.bus.PublishJob(ctx, bus.SubjectJobSearchIndex, dedupeID, payload); err != nil {
+		// Logged, never returned: the message itself is already delivered and
+		// durable, and failing the caller now would be reporting a problem they
+		// cannot act on about work that already succeeded.
+		s.logger.Error("could not enqueue message indexing",
+			slog.String("message_id", messageID.String()), slog.Any("error", err))
+	}
 }
 
 // notifyObservers tells each observer about a delivered message.
@@ -376,6 +445,9 @@ func (s *Service) Edit(ctx context.Context, messageID, editorID uuid.UUID, conte
 
 	s.broadcast(ctx, chatCtx, EventMessageEdited, &SendResult{Recipients: recipients},
 		map[string]any{"chat_id": existing.ChatID, "message": updated})
+	// Re-indexed under the same document id, so the edit replaces the old text
+	// rather than leaving the original findable alongside it.
+	s.indexForSearch(ctx, chatCtx, updated)
 	return updated, nil
 }
 
@@ -416,6 +488,7 @@ func (s *Service) Delete(ctx context.Context, messageID, actorID uuid.UUID) erro
 
 	s.broadcast(ctx, chatCtx, EventMessageDeleted, &SendResult{Recipients: recipients},
 		map[string]any{"chat_id": chatID, "message_id": messageID, "seq": seq})
+	s.removeFromSearch(ctx, messageID)
 	return nil
 }
 

@@ -4273,15 +4273,37 @@ paths:
     post:
       tags: [Admin]
       summary: Rebuild a search index
-      description: Runs as a background job; the response says it was accepted, not that it has finished.
+      description: |
+        Reads from PostgreSQL, which is the source of truth, and writes the
+        documents back. Used after a mapping change or to recover from a lost
+        cluster.
+
+        It runs to completion within the request and reports how many documents
+        it wrote, so a caller knows the rebuild happened rather than only that
+        it was accepted. The message index is bounded to the most recent
+        messages for that reason: recent ones are what people search, and an
+        unbounded rebuild does not belong inside an HTTP request.
+
+        Encrypted chats are never rebuilt — the server has no plaintext to
+        index (§24, §61).
       parameters:
         - { in: path, name: index, required: true, schema: { type: string, enum: [messages, chats, users, news] } }
       responses:
-        "202":
-          description: The rebuild was queued
+        "200":
+          description: The rebuild finished
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          indexed:
+                            type: integer
+                            description: How many documents were written
+        "422": { $ref: "#/components/responses/ValidationFailed" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 

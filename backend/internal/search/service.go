@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -195,10 +196,26 @@ func (s *Service) searchChats(ctx context.Context, query string, limit int) ([]R
 	return s.run(ctx, IndexChats, body)
 }
 
-// searchMessages is scoped to the caller's own chats by filtering on the
-// indexed member list, so message search can never reach a conversation the
-// searcher is not part of.
+// searchMessages is scoped to the caller's own chats, so message search can
+// never reach a conversation the searcher is not part of.
+//
+// The scope comes from PostgreSQL rather than from the index: membership is
+// authoritative there, it changes without any message changing, and it is the
+// one thing that must not be allowed to go stale. An index rebuilt from an old
+// snapshot would otherwise keep showing someone a chat they had been removed
+// from.
 func (s *Service) searchMessages(ctx context.Context, userID uuid.UUID, query string, limit int) ([]Result, error) {
+	chatIDs, err := s.memberChatIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(chatIDs) == 0 {
+		// In no chats, so nothing can match. Returning here also avoids a
+		// terms filter with an empty list, which matches nothing but still
+		// costs a round trip.
+		return nil, nil
+	}
+
 	body := map[string]any{
 		"size": limit,
 		"query": map[string]any{
@@ -211,7 +228,7 @@ func (s *Service) searchMessages(ctx context.Context, userID uuid.UUID, query st
 					},
 				},
 				"filter": []any{
-					map[string]any{"term": map[string]any{"member_ids": userID.String()}},
+					map[string]any{"terms": map[string]any{"chat_id": chatIDs}},
 				},
 			},
 		},
@@ -224,6 +241,54 @@ func (s *Service) searchMessages(ctx context.Context, userID uuid.UUID, query st
 		},
 	}
 	return s.run(ctx, IndexMessages, body)
+}
+
+// maxSearchableChats bounds the scope filter.
+//
+// Someone in more chats than this searches their most recent ones. The limit
+// exists because a terms filter is a clause per value and an unbounded list
+// would let one person's search cost the cluster arbitrarily much; ordering by
+// recent activity means the bound falls where it is least likely to be noticed.
+const maxSearchableChats = 1000
+
+// maxReindexMessages bounds one rebuild of the message index.
+//
+// A rebuild runs inside an HTTP request, so it cannot be unbounded on a
+// deployment with hundreds of millions of messages. Recent messages are also
+// the ones people search for, so this is where a recovering index becomes
+// useful first.
+const maxReindexMessages = 200_000
+
+// memberChatIDs lists the chats the caller may search.
+//
+// Encrypted chats are excluded and could not match anyway: their bodies are
+// never indexed, because the server has never seen them (§24, §61).
+func (s *Service) memberChatIDs(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	rows, err := s.db.Pool.Query(ctx, `
+		SELECT c.id::text
+		FROM chat_members m
+		JOIN chats c ON c.id = m.chat_id
+		WHERE m.user_id = $1 AND m.left_at IS NULL
+		  AND c.deleted_at IS NULL AND c.type <> 'secret'
+		ORDER BY c.last_message_at DESC NULLS LAST
+		LIMIT $2`, userID, maxSearchableChats)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, httpx.Internal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return ids, nil
 }
 
 func (s *Service) run(ctx context.Context, index string, body map[string]any) ([]Result, error) {
@@ -259,10 +324,59 @@ func (s *Service) Reindex(ctx context.Context, index string) (int, error) {
 		return s.reindexUsers(ctx)
 	case IndexChats:
 		return s.reindexChats(ctx)
+	case IndexMessages:
+		return s.reindexMessages(ctx)
 	default:
 		return 0, httpx.Validation("Unsupported index").
-			WithField("index", "must be news, users or chats")
+			WithField("index", "must be news, users, chats or messages")
 	}
+}
+
+// reindexMessages rebuilds the message index from PostgreSQL.
+//
+// Encrypted chats are excluded, and so are deleted messages and messages with
+// no text: a photo with no caption has nothing to match, and indexing it would
+// only make the index larger and the results worse.
+//
+// Bounded to the most recent messages rather than all of history. A full
+// rebuild of a live deployment is a background job with its own pacing, not
+// something to do inside one HTTP request — and the recent window is what makes
+// search useful again fastest after a lost cluster.
+func (s *Service) reindexMessages(ctx context.Context) (int, error) {
+	rows, err := s.db.Pool.Query(ctx, `
+		SELECT m.id, m.chat_id, m.sender_id, m.content, m.seq, m.created_at
+		FROM messages m
+		JOIN chats c ON c.id = m.chat_id
+		WHERE m.deleted_at IS NULL AND m.content <> ''
+		  AND c.deleted_at IS NULL AND c.type <> 'secret'
+		ORDER BY m.created_at DESC
+		LIMIT $1`, maxReindexMessages)
+	if err != nil {
+		return 0, httpx.Internal(err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var (
+			id, chatID uuid.UUID
+			senderID   *uuid.UUID
+			content    string
+			seq        int64
+			createdAt  time.Time
+		)
+		if err := rows.Scan(&id, &chatID, &senderID, &content, &seq, &createdAt); err != nil {
+			return count, httpx.Internal(err)
+		}
+		if err := s.client.Index(ctx, IndexMessages, id.String(), map[string]any{
+			"id": id, "chat_id": chatID, "sender_id": senderID,
+			"content": content, "seq": seq, "created_at": createdAt,
+		}); err != nil {
+			return count, httpx.Internal(err)
+		}
+		count++
+	}
+	return count, rows.Err()
 }
 
 func (s *Service) reindexNews(ctx context.Context) (int, error) {

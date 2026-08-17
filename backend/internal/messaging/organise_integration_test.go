@@ -2,6 +2,7 @@ package messaging_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -32,6 +33,14 @@ import (
 // without: a real NATS server in process and a Redis protocol implementation
 // for the rate limiter. Nothing here is a stub.
 func newService(t *testing.T, db *database.DB) *messaging.Service {
+	t.Helper()
+	service, _ := newServiceWithBus(t, db)
+	return service
+}
+
+// newServiceWithBus also hands back the message bus, so a test can consume the
+// jobs the service queues rather than assuming they were queued.
+func newServiceWithBus(t *testing.T, db *database.DB) (*messaging.Service, *bus.Bus) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -83,7 +92,7 @@ func newService(t *testing.T, db *database.DB) *messaging.Service {
 	})
 
 	return messaging.NewService(messaging.NewRepository(db), messageBus,
-		ratelimit.New(cacheClient, metrics), rules, metrics, logger)
+		ratelimit.New(cacheClient, metrics), rules, metrics, logger), messageBus
 }
 
 // groupChat makes a chat with three members, which is what forwarding and
@@ -1143,5 +1152,158 @@ func TestDraftsAreNotStoredForASecretChat(t *testing.T) {
 	}
 	if draft != "half an ordinary message" {
 		t.Errorf("ordinary draft = %q, want it stored", draft)
+	}
+}
+
+func TestSendingQueuesTheMessageForSearch(t *testing.T) {
+	// The search index has a query side that was fully written and a write side
+	// that was not, so message search returned nothing at all. This asserts the
+	// write side: sending a message queues it for indexing.
+	db := testDB(t)
+	service, messageBus := newServiceWithBus(t, db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobs := make(chan bus.Job, 8)
+	if err := messageBus.ConsumeJobs(ctx, bus.SubjectJobSearchIndex,
+		"search-index-test", 1, func(_ context.Context, job bus.Job) error {
+			jobs <- job
+			return nil
+		}); err != nil {
+		t.Fatalf("consume search jobs: %v", err)
+	}
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID := groupChat(t, db, alice, bob)
+
+	sent, err := service.Send(ctx, messaging.SendInput{
+		ChatID:          chatID,
+		SenderID:        alice,
+		ClientMessageID: uuid.New(),
+		Type:            messaging.TypeText,
+		Content:         "پیام قابل جست‌وجو",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case job := <-jobs:
+		var payload struct {
+			Index      string         `json:"index"`
+			DocumentID string         `json:"document_id"`
+			Document   map[string]any `json:"document"`
+			Delete     bool           `json:"delete"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			t.Fatalf("decode the queued job: %v", err)
+		}
+		if payload.Index != "messages" {
+			t.Errorf("index = %q, want messages", payload.Index)
+		}
+		if payload.DocumentID != sent.ID.String() {
+			t.Errorf("document_id = %q, want %s", payload.DocumentID, sent.ID)
+		}
+		// The text has to reach the index or there is nothing to match on.
+		if payload.Document["content"] != "پیام قابل جست‌وجو" {
+			t.Errorf("indexed content = %v, want the message text", payload.Document["content"])
+		}
+		// Scoping is by chat, so this field is what keeps a search inside the
+		// caller's own conversations.
+		if payload.Document["chat_id"] != chatID.String() {
+			t.Errorf("indexed chat_id = %v, want %s", payload.Document["chat_id"], chatID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("no search-index job was queued for a sent message")
+	}
+}
+
+func TestDeletingAMessageRemovesItFromSearch(t *testing.T) {
+	// A deleted message that stays searchable is a deletion that did not happen
+	// as far as the person who asked for it is concerned.
+	db := testDB(t)
+	service, messageBus := newServiceWithBus(t, db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobs := make(chan bus.Job, 8)
+	if err := messageBus.ConsumeJobs(ctx, bus.SubjectJobSearchIndex,
+		"search-delete-test", 1, func(_ context.Context, job bus.Job) error {
+			jobs <- job
+			return nil
+		}); err != nil {
+		t.Fatalf("consume search jobs: %v", err)
+	}
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID := groupChat(t, db, alice, bob)
+
+	sent, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "to be deleted",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if err := service.Delete(ctx, sent.ID, alice); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case job := <-jobs:
+			var payload struct {
+				DocumentID string `json:"document_id"`
+				Delete     bool   `json:"delete"`
+			}
+			if err := json.Unmarshal(job.Payload, &payload); err != nil {
+				t.Fatalf("decode the queued job: %v", err)
+			}
+			if payload.Delete && payload.DocumentID == sent.ID.String() {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no removal was queued for a deleted message")
+		}
+	}
+}
+
+func TestSecretChatMessagesAreNeverQueuedForSearch(t *testing.T) {
+	// Belt and braces. Sending into a secret chat is already refused, so this
+	// asserts the second guard independently: if that refusal were ever relaxed,
+	// the plaintext still must not reach an index.
+	db := testDB(t)
+	service, messageBus := newServiceWithBus(t, db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jobs := make(chan bus.Job, 8)
+	if err := messageBus.ConsumeJobs(ctx, bus.SubjectJobSearchIndex,
+		"search-secret-test", 1, func(_ context.Context, job bus.Job) error {
+			jobs <- job
+			return nil
+		}); err != nil {
+		t.Fatalf("consume search jobs: %v", err)
+	}
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	secret := secretChat(t, db, alice, bob)
+
+	if _, err := service.Send(ctx, messaging.SendInput{
+		ChatID: secret, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "never indexed",
+	}); err == nil {
+		t.Fatal("Send into a secret chat succeeded")
+	}
+
+	select {
+	case job := <-jobs:
+		t.Fatalf("a secret chat produced a search-index job: %s", job.Payload)
+	case <-time.After(2 * time.Second):
+		// Nothing queued, which is the point.
 	}
 }

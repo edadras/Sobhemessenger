@@ -195,11 +195,18 @@ var indexDefinitions = map[string]map[string]any{
 	},
 	IndexMessages: {
 		"properties": map[string]any{
-			"id":      map[string]any{"type": "keyword"},
-			"chat_id": map[string]any{"type": "keyword"},
-			// The member list is indexed so a query can be filtered to the
-			// chats the searcher actually belongs to, in one round trip.
-			"member_ids": map[string]any{"type": "keyword"},
+			"id": map[string]any{"type": "keyword"},
+			// Scoping is by chat, and the caller's chats are resolved from
+			// PostgreSQL at query time.
+			//
+			// The obvious alternative — indexing each message with the list of
+			// members who may read it — cannot work here. A channel can have
+			// hundreds of thousands of subscribers, so every message document
+			// would carry that many ids, and one person joining or leaving
+			// would mean rewriting every message in the chat. Chat membership
+			// is small and already indexed in PostgreSQL; a message is not the
+			// place to duplicate it.
+			"chat_id":    map[string]any{"type": "keyword"},
 			"sender_id":  map[string]any{"type": "keyword"},
 			"content":    textField(),
 			"seq":        map[string]any{"type": "long"},
