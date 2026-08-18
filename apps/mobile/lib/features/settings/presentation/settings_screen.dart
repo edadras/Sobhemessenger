@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/settings/settings_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
@@ -63,6 +64,13 @@ class SettingsScreen extends ConsumerWidget {
               MaterialPageRoute<void>(
                 builder: (_) => const NotificationSettingsScreen(),
               ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: Text(l10n.settingsPrivacy),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const PrivacyScreen()),
             ),
           ),
           ListTile(
@@ -150,6 +158,149 @@ class NotificationSettingsScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Who may see what (§55).
+///
+/// The rules are enforced inside the server's own queries, so a change here
+/// takes effect on the next request anyone makes about this account rather than
+/// on some later sync. Every key is listed, including ones never touched: the
+/// server fills those in with the default it applies anyway, so the screen
+/// shows the whole picture rather than only the parts already changed.
+class PrivacyScreen extends ConsumerStatefulWidget {
+  const PrivacyScreen({super.key});
+
+  @override
+  ConsumerState<PrivacyScreen> createState() => _PrivacyScreenState();
+}
+
+class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
+  Future<List<PrivacySetting>>? _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load() {
+    setState(() {
+      _settings = ref.read(accountRepositoryProvider).privacySettings();
+    });
+  }
+
+  /// The label for a key, so the screen never shows a raw identifier like
+  /// `group_invites` to someone.
+  String _label(AppLocalizations l10n, String key) => switch (key) {
+        'last_seen' => l10n.privacyLastSeen,
+        'profile_photo' => l10n.privacyProfilePhoto,
+        'phone_number' => l10n.privacyPhoneNumber,
+        'read_receipts' => l10n.privacyReadReceipts,
+        'typing' => l10n.privacyTyping,
+        'calls' => l10n.privacyCalls,
+        'group_invites' => l10n.privacyGroupInvites,
+        'messages' => l10n.privacyMessages,
+        'stories' => l10n.privacyStories,
+        // A key the server knows and this build does not. Showing it under its
+        // own name beats hiding a setting that is in force.
+        _ => key,
+      };
+
+  String _ruleLabel(AppLocalizations l10n, String rule) => switch (rule) {
+        'everyone' => l10n.privacyEveryone,
+        'contacts' => l10n.privacyContacts,
+        _ => l10n.privacyNobody,
+      };
+
+  Future<void> _change(PrivacySetting setting, String rule) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref
+          .read(accountRepositoryProvider)
+          .setPrivacy(setting.copyWith(rule: rule));
+      messenger.showSnackBar(SnackBar(content: Text(l10n.privacySaved)));
+      _load();
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.privacyTitle)),
+      body: FutureBuilder<List<PrivacySetting>>(
+        future: _settings,
+        builder: (
+          BuildContext context,
+          AsyncSnapshot<List<PrivacySetting>> snapshot,
+        ) {
+          if (snapshot.hasError) {
+            return SobhErrorState(error: snapshot.error!, onRetry: _load);
+          }
+          if (!snapshot.hasData) {
+            return const SobhLoading();
+          }
+
+          final List<PrivacySetting> settings = snapshot.data!;
+          return ListView.separated(
+            itemCount: settings.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final PrivacySetting setting = settings[index];
+              final int exceptions =
+                  setting.allowList.length + setting.denyList.length;
+
+              return ListTile(
+                title: Text(_label(l10n, setting.key)),
+                subtitle: exceptions == 0
+                    ? null
+                    // Exceptions are kept when the rule changes, so saying they
+                    // exist stops someone believing a rule applies to everyone
+                    // when it does not.
+                    : Text(
+                        l10n.privacyExceptions(
+                          setting.allowList.length,
+                          setting.denyList.length,
+                        ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: palette.textSecondary),
+                      ),
+                trailing: DropdownButton<String>(
+                  value: setting.rule,
+                  underline: const SizedBox.shrink(),
+                  onChanged: (String? rule) {
+                    if (rule != null && rule != setting.rule) {
+                      _change(setting, rule);
+                    }
+                  },
+                  items: <String>['everyone', 'contacts', 'nobody']
+                      .map(
+                        (String rule) => DropdownMenuItem<String>(
+                          value: rule,
+                          child: Text(_ruleLabel(l10n, rule)),
+                        ),
+                      )
+                      .toList(),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

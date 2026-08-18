@@ -401,5 +401,17 @@
   "chatEditMessage": "Edit message",
   "chatDeleteMessage": "Delete message",
   "chatDeleteConfirm": "This message will be deleted for everyone. This cannot be undone.",
-  "chatReact": "React"
+  "chatReact": "React",
+  "privacyTitle": "Privacy",
+  "privacyLastSeen": "Last seen",
+  "privacyProfilePhoto": "Profile photo",
+  "privacyPhoneNumber": "Phone number",
+  "privacyReadReceipts": "Read receipts",
+  "privacyTyping": "Typing indicator",
+  "privacyCalls": "Calls",
+  "privacyGroupInvites": "Group invitations",
+  "privacyMessages": "Messages from",
+  "privacyStories": "Stories",
+  "privacyExceptions": "{allowed} always allowed, {denied} never",
+  "privacySaved": "Saved"
 }

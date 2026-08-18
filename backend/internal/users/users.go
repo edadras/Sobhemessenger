@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,6 +70,30 @@ type SelfProfile struct {
 	Profile
 	PhoneNumber string     `json:"phone_number"`
 	Birthday    *time.Time `json:"birthday,omitempty"`
+}
+
+// PrivacyKeys are the settings a person may govern (§55).
+//
+// Fixed rather than free-form: the resolver names each key inside SQL queries,
+// so a key nobody reads is a setting that silently does nothing, and a typo
+// would be indistinguishable from one.
+var PrivacyKeys = []string{
+	"last_seen", "profile_photo", "phone_number", "read_receipts",
+	"typing", "calls", "group_invites", "messages", "stories",
+}
+
+// PrivacyRules are the values a key may take.
+var PrivacyRules = map[string]bool{"everyone": true, "contacts": true, "nobody": true}
+
+// PrivacySetting is one rule, with the exceptions layered over it.
+//
+// The lists are how "everyone except her" and "nobody but him" are expressed;
+// the resolver applies a deny before an allow before the rule.
+type PrivacySetting struct {
+	Key       string      `json:"key"`
+	Rule      string      `json:"rule"`
+	AllowList []uuid.UUID `json:"allow_list"`
+	DenyList  []uuid.UUID `json:"deny_list"`
 }
 
 type Repository struct {
@@ -248,6 +273,82 @@ func (r *Repository) UsernameAvailable(ctx context.Context, username string, cla
 
 // ---------------------------------------------------------------- service
 
+// PrivacySettings reads every rule a person has, filling in any key that has
+// never been written with the same default the resolver assumes.
+func (r *Repository) PrivacySettings(ctx context.Context, userID uuid.UUID) ([]PrivacySetting, error) {
+	rows, err := r.db.Pool.Query(ctx,
+		`SELECT key, rule, allow_list, deny_list FROM user_privacy_settings WHERE user_id = $1`,
+		userID)
+	if err != nil {
+		return nil, fmt.Errorf("users: read privacy settings: %w", err)
+	}
+	defer rows.Close()
+
+	stored := make(map[string]PrivacySetting, len(PrivacyKeys))
+	for rows.Next() {
+		var setting PrivacySetting
+		if err := rows.Scan(&setting.Key, &setting.Rule, &setting.AllowList, &setting.DenyList); err != nil {
+			return nil, err
+		}
+		stored[setting.Key] = setting
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Returned in the fixed key order, with unset keys defaulted, so the client
+	// renders a complete list rather than one that grows as settings are
+	// touched for the first time.
+	settings := make([]PrivacySetting, 0, len(PrivacyKeys))
+	for _, key := range PrivacyKeys {
+		if setting, ok := stored[key]; ok {
+			if setting.AllowList == nil {
+				setting.AllowList = []uuid.UUID{}
+			}
+			if setting.DenyList == nil {
+				setting.DenyList = []uuid.UUID{}
+			}
+			settings = append(settings, setting)
+			continue
+		}
+		settings = append(settings, PrivacySetting{
+			Key:       key,
+			Rule:      defaultPrivacyRule(key),
+			AllowList: []uuid.UUID{},
+			DenyList:  []uuid.UUID{},
+		})
+	}
+	return settings, nil
+}
+
+// defaultPrivacyRule mirrors what registration seeds and what privacy_allows
+// falls back to for a key that was never written.
+func defaultPrivacyRule(key string) string {
+	switch key {
+	case "profile_photo", "read_receipts", "typing", "messages":
+		return "everyone"
+	case "phone_number":
+		return "nobody"
+	default:
+		return "contacts"
+	}
+}
+
+// SetPrivacy writes one rule.
+func (r *Repository) SetPrivacy(ctx context.Context, userID uuid.UUID, setting PrivacySetting) error {
+	_, err := r.db.Pool.Exec(ctx, `
+		INSERT INTO user_privacy_settings (user_id, key, rule, allow_list, deny_list, updated_at)
+		VALUES ($1, $2, $3, $4, $5, now())
+		ON CONFLICT (user_id, key) DO UPDATE
+		SET rule = EXCLUDED.rule, allow_list = EXCLUDED.allow_list,
+		    deny_list = EXCLUDED.deny_list, updated_at = now()`,
+		userID, setting.Key, setting.Rule, setting.AllowList, setting.DenyList)
+	if err != nil {
+		return fmt.Errorf("users: write privacy setting: %w", err)
+	}
+	return nil
+}
+
 type Service struct {
 	repo *Repository
 }
@@ -378,6 +479,61 @@ func (s *Service) CheckUsername(ctx context.Context, username string, claimant u
 
 // ---------------------------------------------------------------- handler
 
+// PrivacySettings returns every rule, including the ones still at their
+// default.
+func (s *Service) PrivacySettings(ctx context.Context, userID uuid.UUID) ([]PrivacySetting, error) {
+	settings, err := s.repo.PrivacySettings(ctx, userID)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return settings, nil
+}
+
+// SetPrivacy changes one rule.
+//
+// The key and rule are checked against fixed sets rather than passed through:
+// the database would reject an unknown rule, but an unknown *key* would be
+// accepted and then never read by anything, leaving someone believing they had
+// restricted something they had not.
+func (s *Service) SetPrivacy(ctx context.Context, userID uuid.UUID, setting PrivacySetting) error {
+	if !slices.Contains(PrivacyKeys, setting.Key) {
+		return httpx.Validation("Unknown privacy setting").
+			WithField("key", "must be one of "+strings.Join(PrivacyKeys, ", "))
+	}
+	if !PrivacyRules[setting.Rule] {
+		return httpx.Validation("Unknown privacy rule").
+			WithField("rule", "must be everyone, contacts or nobody")
+	}
+	if len(setting.AllowList) > maxPrivacyListEntries || len(setting.DenyList) > maxPrivacyListEntries {
+		return httpx.Validation("Too many exceptions in one privacy rule").
+			WithField("allow_list", fmt.Sprintf("at most %d entries", maxPrivacyListEntries))
+	}
+	// Someone in both lists is a contradiction the resolver settles by denying,
+	// so it is refused here rather than stored and silently reinterpreted.
+	for _, allowed := range setting.AllowList {
+		if slices.Contains(setting.DenyList, allowed) {
+			return httpx.Validation("A person cannot be both allowed and denied").
+				WithField("deny_list", "overlaps allow_list")
+		}
+	}
+
+	if setting.AllowList == nil {
+		setting.AllowList = []uuid.UUID{}
+	}
+	if setting.DenyList == nil {
+		setting.DenyList = []uuid.UUID{}
+	}
+	if err := s.repo.SetPrivacy(ctx, userID, setting); err != nil {
+		return httpx.Internal(err)
+	}
+	return nil
+}
+
+// maxPrivacyListEntries bounds one rule's exception lists. They are stored as
+// an array column and scanned by the resolver on every check, so an unbounded
+// list would make every visibility question slower for everyone.
+const maxPrivacyListEntries = 1000
+
 type Handler struct {
 	service *Service
 }
@@ -391,8 +547,55 @@ func (h *Handler) Routes() http.Handler {
 	r.Put("/me/username", h.claimUsername)
 	r.Get("/username-available", h.checkUsername)
 	r.Get("/by-username/{username}", h.byUsername)
+	r.Get("/me/privacy", h.privacySettings)
+	r.Put("/me/privacy/{key}", h.setPrivacy)
 	r.Get("/{userID}", h.profile)
 	return r
+}
+
+func (h *Handler) privacySettings(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	settings, err := h.service.PrivacySettings(r.Context(), principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"settings": settings})
+}
+
+func (h *Handler) setPrivacy(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Rule      string      `json:"rule"`
+		AllowList []uuid.UUID `json:"allow_list"`
+		DenyList  []uuid.UUID `json:"deny_list"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	setting := PrivacySetting{
+		Key:       chi.URLParam(r, "key"),
+		Rule:      body.Rule,
+		AllowList: body.AllowList,
+		DenyList:  body.DenyList,
+	}
+	if err := h.service.SetPrivacy(r.Context(), principal.UserID, setting); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, setting)
 }
 
 func (h *Handler) self(w http.ResponseWriter, r *http.Request) {

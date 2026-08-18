@@ -178,11 +178,78 @@ class AccountRepository {
         body: settings.toJson(),
       );
 
+  /// Every privacy rule, including keys never explicitly set — the server
+  /// fills those in with the default it applies anyway, so the screen shows a
+  /// complete list rather than one that grows as settings are first touched.
+  Future<List<PrivacySetting>> privacySettings() async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/users/me/privacy');
+    return <PrivacySetting>[
+      for (final dynamic entry
+          in data['settings'] as List<dynamic>? ?? const <dynamic>[])
+        PrivacySetting.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
+  /// Changes one rule. The exception lists are sent unchanged, so switching
+  /// "last seen" from contacts to everyone does not quietly discard the person
+  /// who was blocked from seeing it.
+  Future<void> setPrivacy(PrivacySetting setting) =>
+      _api.put<Map<String, dynamic>>(
+        '/users/me/privacy/${setting.key}',
+        body: <String, dynamic>{
+          'rule': setting.rule,
+          'allow_list': setting.allowList,
+          'deny_list': setting.denyList,
+        },
+      );
+
   Future<int> unreadNotificationCount() async {
     final Map<String, dynamic> data =
         await _api.get<Map<String, dynamic>>('/notifications/unread-count');
     return (data['unread_count'] as num?)?.toInt() ?? 0;
   }
+}
+
+/// One privacy rule of §55.
+///
+/// The rule decides the general case; the two lists are the exceptions, which
+/// is how "everyone except her" and "nobody but him" are expressed. The server
+/// applies a deny before an allow before the rule.
+class PrivacySetting {
+  const PrivacySetting({
+    required this.key,
+    required this.rule,
+    this.allowList = const <String>[],
+    this.denyList = const <String>[],
+  });
+
+  factory PrivacySetting.fromJson(Map<String, dynamic> json) => PrivacySetting(
+        key: json['key'] as String,
+        rule: json['rule'] as String? ?? 'contacts',
+        allowList: <String>[
+          for (final dynamic id
+              in json['allow_list'] as List<dynamic>? ?? const <dynamic>[])
+            id as String,
+        ],
+        denyList: <String>[
+          for (final dynamic id
+              in json['deny_list'] as List<dynamic>? ?? const <dynamic>[])
+            id as String,
+        ],
+      );
+
+  final String key;
+  final String rule;
+  final List<String> allowList;
+  final List<String> denyList;
+
+  PrivacySetting copyWith({String? rule}) => PrivacySetting(
+        key: key,
+        rule: rule ?? this.rule,
+        allowList: allowList,
+        denyList: denyList,
+      );
 }
 
 final Provider<AccountRepository> accountRepositoryProvider =

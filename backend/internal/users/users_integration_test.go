@@ -385,3 +385,138 @@ func TestProfileReflectsTheViewersRelationship(t *testing.T) {
 		t.Fatal("a saved contact is not reported as one")
 	}
 }
+
+func TestPrivacySettingsStartAtTheirDefaults(t *testing.T) {
+	// Every key comes back even when it has never been written, because a
+	// client showing only the settings someone had already touched would show
+	// an empty screen to everyone who had never touched any.
+	db := testDB(t)
+	repo := users.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db)
+
+	settings, err := repo.PrivacySettings(ctx, alice)
+	if err != nil {
+		t.Fatalf("PrivacySettings: %v", err)
+	}
+	if len(settings) != len(users.PrivacyKeys) {
+		t.Fatalf("got %d settings, want %d", len(settings), len(users.PrivacyKeys))
+	}
+
+	byKey := map[string]string{}
+	for _, setting := range settings {
+		byKey[setting.Key] = setting.Rule
+		if setting.AllowList == nil || setting.DenyList == nil {
+			t.Errorf("%s came back with a nil list, which serialises as null rather than []", setting.Key)
+		}
+	}
+	// The defaults the resolver assumes, which registration also seeds.
+	if byKey["phone_number"] != "nobody" {
+		t.Errorf("phone_number defaults to %q, want nobody", byKey["phone_number"])
+	}
+	if byKey["profile_photo"] != "everyone" {
+		t.Errorf("profile_photo defaults to %q, want everyone", byKey["profile_photo"])
+	}
+	if byKey["last_seen"] != "contacts" {
+		t.Errorf("last_seen defaults to %q, want contacts", byKey["last_seen"])
+	}
+}
+
+func TestAPrivacyRuleChangesWhatTheResolverAnswers(t *testing.T) {
+	// The point of the endpoint. Writing a rule has to move the answer the SQL
+	// resolver gives, or the setting is a screen that does nothing.
+	db := testDB(t)
+	repo := users.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db)
+	bob := createUser(t, db)
+
+	allows := func() bool {
+		var permitted bool
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT privacy_allows($1, $2, 'last_seen')`, alice, bob).Scan(&permitted); err != nil {
+			t.Fatalf("privacy_allows: %v", err)
+		}
+		return permitted
+	}
+
+	if err := repo.SetPrivacy(ctx, alice, users.PrivacySetting{
+		Key: "last_seen", Rule: "everyone",
+		AllowList: []uuid.UUID{}, DenyList: []uuid.UUID{},
+	}); err != nil {
+		t.Fatalf("SetPrivacy everyone: %v", err)
+	}
+	if !allows() {
+		t.Error("rule 'everyone' still hid last seen from a stranger")
+	}
+
+	if err := repo.SetPrivacy(ctx, alice, users.PrivacySetting{
+		Key: "last_seen", Rule: "nobody",
+		AllowList: []uuid.UUID{}, DenyList: []uuid.UUID{},
+	}); err != nil {
+		t.Fatalf("SetPrivacy nobody: %v", err)
+	}
+	if allows() {
+		t.Error("rule 'nobody' still showed last seen")
+	}
+
+	// An allow-list entry overrides the rule for one person.
+	if err := repo.SetPrivacy(ctx, alice, users.PrivacySetting{
+		Key: "last_seen", Rule: "nobody",
+		AllowList: []uuid.UUID{bob}, DenyList: []uuid.UUID{},
+	}); err != nil {
+		t.Fatalf("SetPrivacy with an allow list: %v", err)
+	}
+	if !allows() {
+		t.Error("an allow-list entry did not override 'nobody'")
+	}
+
+	// And a deny wins over both the rule and the allow list.
+	if err := repo.SetPrivacy(ctx, alice, users.PrivacySetting{
+		Key: "last_seen", Rule: "everyone",
+		AllowList: []uuid.UUID{bob}, DenyList: []uuid.UUID{bob},
+	}); err != nil {
+		t.Fatalf("SetPrivacy with a deny list: %v", err)
+	}
+	if allows() {
+		t.Error("a deny-list entry did not override the rule and the allow list")
+	}
+}
+
+func TestWritingAPrivacyRuleTwiceReplacesIt(t *testing.T) {
+	// Registration seeds every key, so every write is an update rather than an
+	// insert; a plain INSERT would fail on the primary key.
+	db := testDB(t)
+	repo := users.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db)
+
+	for _, rule := range []string{"everyone", "nobody", "contacts"} {
+		if err := repo.SetPrivacy(ctx, alice, users.PrivacySetting{
+			Key: "stories", Rule: rule,
+			AllowList: []uuid.UUID{}, DenyList: []uuid.UUID{},
+		}); err != nil {
+			t.Fatalf("SetPrivacy %s: %v", rule, err)
+		}
+	}
+
+	settings, err := repo.PrivacySettings(ctx, alice)
+	if err != nil {
+		t.Fatalf("PrivacySettings: %v", err)
+	}
+	seen := 0
+	for _, setting := range settings {
+		if setting.Key == "stories" {
+			seen++
+			if setting.Rule != "contacts" {
+				t.Errorf("stories = %q, want the last value written", setting.Rule)
+			}
+		}
+	}
+	if seen != 1 {
+		t.Errorf("the key appeared %d times, want once", seen)
+	}
+}

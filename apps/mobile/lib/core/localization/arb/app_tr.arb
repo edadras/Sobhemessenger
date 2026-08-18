@@ -401,5 +401,17 @@
   "chatEditMessage": "Mesajı düzenle",
   "chatDeleteMessage": "Mesajı sil",
   "chatDeleteConfirm": "Bu mesaj herkes için silinecek. Bu işlem geri alınamaz.",
-  "chatReact": "Tepki ver"
+  "chatReact": "Tepki ver",
+  "privacyTitle": "Gizlilik",
+  "privacyLastSeen": "Son görülme",
+  "privacyProfilePhoto": "Profil fotoğrafı",
+  "privacyPhoneNumber": "Telefon numarası",
+  "privacyReadReceipts": "Okundu bilgisi",
+  "privacyTyping": "Yazıyor göstergesi",
+  "privacyCalls": "Aramalar",
+  "privacyGroupInvites": "Gruplara ekleme",
+  "privacyMessages": "Mesaj gönderebilecekler",
+  "privacyStories": "Hikâyeler",
+  "privacyExceptions": "{allowed} her zaman izinli, {denied} hiçbir zaman",
+  "privacySaved": "Kaydedildi"
 }

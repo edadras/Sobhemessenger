@@ -21,7 +21,7 @@ class Call {
   factory Call.fromJson(Map<String, dynamic> json) => Call(
         id: json['id'] as String,
         initiatorId: json['initiator_id'] as String,
-        type: json['type'] as String? ?? 'audio',
+        type: json['type'] as String? ?? 'voice',
         scope: json['scope'] as String? ?? 'private',
         state: json['state'] as String? ?? 'ringing',
         startedAt: DateTime.parse(json['started_at'] as String).toLocal(),
@@ -133,7 +133,10 @@ class CallsRepository {
       '/calls',
       body: <String, dynamic>{
         'chat_id': chatId,
-        'type': video ? 'video' : 'audio',
+        // 'voice', not 'audio': the server and the calls table both name it
+        // that way, and sending 'audio' was refused outright — every voice call
+        // from the app failed validation.
+        'type': video ? 'video' : 'voice',
       },
     );
     return Call.fromJson(data);

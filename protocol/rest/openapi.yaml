@@ -1256,6 +1256,82 @@ paths:
                             enum: [invalid, reserved, taken]
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/v1/users/me/privacy:
+    get:
+      tags: [Users]
+      summary: Every privacy rule this account has
+      description: |
+        Returns all nine keys of §55 — `last_seen`, `profile_photo`,
+        `phone_number`, `read_receipts`, `typing`, `calls`, `group_invites`,
+        `messages`, `stories` — including keys never explicitly set, filled in
+        with the default the resolver itself assumes. A client renders a
+        complete list rather than one that grows as settings are first touched.
+      responses:
+        "200":
+          description: The rules
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          settings:
+                            type: array
+                            items: { $ref: "#/components/schemas/PrivacySetting" }
+
+  /api/v1/users/me/privacy/{key}:
+    put:
+      tags: [Users]
+      summary: Change one privacy rule
+      description: |
+        The rule decides the general case; `allow_list` and `deny_list` are the
+        exceptions, which is how "everyone except her" and "nobody but him" are
+        expressed. The resolver applies a deny before an allow before the rule,
+        so naming somebody in both is refused rather than stored and silently
+        reinterpreted.
+
+        An unknown key is refused. The database would accept it, but nothing
+        would ever read it — leaving someone believing they had restricted
+        something they had not.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [last_seen, profile_photo, phone_number, read_receipts, typing, calls, group_invites, messages, stories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rule]
+              properties:
+                rule: { type: string, enum: [everyone, contacts, nobody] }
+                allow_list:
+                  type: array
+                  maxItems: 1000
+                  items: { type: string, format: uuid }
+                deny_list:
+                  type: array
+                  maxItems: 1000
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The stored rule
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data: { $ref: "#/components/schemas/PrivacySetting" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
   /api/v1/users/by-username/{username}:
     get:
       tags: [Users]
@@ -3214,7 +3290,14 @@ paths:
               required: [chat_id, type]
               properties:
                 chat_id: { type: string, format: uuid }
-                type: { type: string, enum: [audio, video, group_audio, group_video] }
+                type:
+          type: string
+          enum: [voice, video]
+          description: |
+            What media the call carries. Whether it is a one-to-one or a group
+            call is not part of this — the server derives `scope` from the chat
+            it is placed in, so a call in a group is a group call without the
+            caller saying so.
       responses:
         "201":
           description: The call
@@ -4839,6 +4922,21 @@ components:
         avatar_media_id: { type: string, format: uuid }
         is_bot: { type: boolean }
 
+    PrivacySetting:
+      type: object
+      description: One rule of §55, with the exceptions layered over it.
+      properties:
+        key: { type: string }
+        rule: { type: string, enum: [everyone, contacts, nobody] }
+        allow_list:
+          type: array
+          items: { type: string, format: uuid }
+          description: Seen even when the rule would hide it
+        deny_list:
+          type: array
+          items: { type: string, format: uuid }
+          description: Never seen, whatever the rule says
+
     Membership:
       type: object
       properties:
@@ -5291,7 +5389,14 @@ components:
         id: { type: string, format: uuid }
         chat_id: { type: string, format: uuid }
         initiator_id: { type: string, format: uuid }
-        type: { type: string, enum: [audio, video, group_audio, group_video] }
+        type:
+          type: string
+          enum: [voice, video]
+          description: |
+            What media the call carries. Whether it is a one-to-one or a group
+            call is not part of this — the server derives `scope` from the chat
+            it is placed in, so a call in a group is a group call without the
+            caller saying so.
         status: { type: string, enum: [ringing, active, ended, missed, rejected] }
         end_reason: { type: string }
         started_at: { type: string, format: date-time }

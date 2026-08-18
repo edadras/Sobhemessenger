@@ -401,5 +401,17 @@
   "chatEditMessage": "تعديل الرسالة",
   "chatDeleteMessage": "حذف الرسالة",
   "chatDeleteConfirm": "ستُحذف هذه الرسالة لدى الجميع، ولا يمكن التراجع عن ذلك.",
-  "chatReact": "تفاعل"
+  "chatReact": "تفاعل",
+  "privacyTitle": "الخصوصية",
+  "privacyLastSeen": "آخر ظهور",
+  "privacyProfilePhoto": "صورة الملف الشخصي",
+  "privacyPhoneNumber": "رقم الهاتف",
+  "privacyReadReceipts": "إشعارات القراءة",
+  "privacyTyping": "مؤشر الكتابة",
+  "privacyCalls": "المكالمات",
+  "privacyGroupInvites": "الإضافة إلى المجموعات",
+  "privacyMessages": "الرسائل من",
+  "privacyStories": "القصص",
+  "privacyExceptions": "{allowed} مسموح دائمًا، {denied} ممنوع دائمًا",
+  "privacySaved": "تم الحفظ"
 }

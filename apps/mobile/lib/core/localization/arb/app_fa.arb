@@ -446,5 +446,27 @@
   "chatEditMessage": "ویرایش پیام",
   "chatDeleteMessage": "حذف پیام",
   "chatDeleteConfirm": "این پیام برای همه حذف می‌شود. این کار برگشت‌پذیر نیست.",
-  "chatReact": "واکنش"
+  "chatReact": "واکنش",
+  "privacyTitle": "حریم خصوصی",
+  "privacyLastSeen": "آخرین بازدید",
+  "privacyProfilePhoto": "عکس پروفایل",
+  "privacyPhoneNumber": "شماره تلفن",
+  "privacyReadReceipts": "تیک خوانده‌شدن",
+  "privacyTyping": "نشانگر در حال نوشتن",
+  "privacyCalls": "تماس‌ها",
+  "privacyGroupInvites": "افزودن به گروه",
+  "privacyMessages": "پیام از",
+  "privacyStories": "استوری‌ها",
+  "privacyExceptions": "{allowed} استثنای مجاز و {denied} استثنای ممنوع",
+  "privacySaved": "ذخیره شد",
+  "@privacyExceptions": {
+    "placeholders": {
+      "allowed": {
+        "type": "int"
+      },
+      "denied": {
+        "type": "int"
+      }
+    }
+  }
 }
