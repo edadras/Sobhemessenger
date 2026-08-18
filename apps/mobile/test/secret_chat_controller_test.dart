@@ -22,8 +22,9 @@ SecretMessage _message(
       at: DateTime.utc(2026, 1, 1, 12, minute),
     );
 
-List<String> _ids(List<SecretMessage> messages) =>
-    <String>[for (final SecretMessage message in messages) message.clientMessageId];
+List<String> _ids(List<SecretMessage> messages) => <String>[
+      for (final SecretMessage message in messages) message.clientMessageId,
+    ];
 
 void main() {
   group('mergeSecretMessages', () {
@@ -73,7 +74,8 @@ void main() {
           _message('c', minute: 7),
         ],
       );
-      final List<SecretMessage> again = mergeSecretMessages(first, const <SecretMessage>[]);
+      final List<SecretMessage> again =
+          mergeSecretMessages(first, const <SecretMessage>[]);
 
       expect(_ids(first), <String>['a', 'b', 'c']);
       expect(_ids(again), <String>['a', 'b', 'c']);
@@ -85,7 +87,10 @@ void main() {
       final List<SecretMessage> existing = <SecretMessage>[
         _message('later', minute: 30),
       ];
-      mergeSecretMessages(existing, <SecretMessage>[_message('earlier', minute: 5)]);
+      mergeSecretMessages(
+        existing,
+        <SecretMessage>[_message('earlier', minute: 5)],
+      );
 
       expect(_ids(existing), <String>['later']);
     });

@@ -180,10 +180,19 @@ func PermissionsForRole(role, chatType string) Permissions {
 		// Ordinary members may post everywhere except channels, where posting
 		// is an administrative act.
 		canPost := chatType != ChatChannel
+		// A one-to-one chat has no hierarchy: both people join as members and
+		// neither is an owner, so a permission withheld from members is
+		// withheld from everyone. Pinning is the case that matters — without
+		// this nobody can pin in a private conversation at all, which is not a
+		// restriction anyone asked for but the accident of reusing the group
+		// role model for a chat that has no roles.
+		oneToOne := chatType == ChatPrivate || chatType == ChatSecret
 		return Permissions{
 			SendMessages: canPost, SendMedia: canPost, SendFiles: canPost,
 			SendPolls: canPost, SendStickers: canPost, EmbedLinks: canPost,
-			AddMembers: chatType == ChatGroup,
+			AddMembers:  chatType == ChatGroup,
+			PinMessages: oneToOne,
+			ManageCalls: oneToOne,
 		}
 	}
 }

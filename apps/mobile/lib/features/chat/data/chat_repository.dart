@@ -89,9 +89,9 @@ class ChatRepository {
     for (final dynamic entry in raw) {
       final Map<String, dynamic> chat = entry as Map<String, dynamic>;
       final Map<String, dynamic> membership =
-          chat['membership'] as Map<String, dynamic>? ?? const <String, dynamic>{};
-      final Map<String, dynamic>? peer =
-          chat['peer'] as Map<String, dynamic>?;
+          chat['membership'] as Map<String, dynamic>? ??
+              const <String, dynamic>{};
+      final Map<String, dynamic>? peer = chat['peer'] as Map<String, dynamic>?;
 
       final String id = chat['id'] as String;
       ids.add(id);
@@ -190,8 +190,7 @@ class ChatRepository {
   /// once the server has accepted it — showing the new text and then reverting
   /// it would be worse than a moment's delay.
   Future<void> editMessage(String messageId, String content) async {
-    final Map<String, dynamic> updated =
-        await _api.patch<Map<String, dynamic>>(
+    final Map<String, dynamic> updated = await _api.patch<Map<String, dynamic>>(
       '/messages/$messageId',
       body: <String, dynamic>{'content': content},
     );

@@ -220,7 +220,8 @@ class SecretChatService {
   }) async {
     final SecureSignalStore store = _requireStore();
     final IdentityKeyPair identity = await store.getIdentityKeyPair();
-    final SignedPreKeyRecord signed = await store.loadSignedPreKey(signedPrekeyId);
+    final SignedPreKeyRecord signed =
+        await store.loadSignedPreKey(signedPrekeyId);
 
     final List<Map<String, dynamic>> oneTime = <Map<String, dynamic>>[];
     if (withPrekeys) {
@@ -312,7 +313,11 @@ class SecretChatService {
     );
 
     final SessionBuilder builder = SessionBuilder(
-      store, store, store, store, address,
+      store,
+      store,
+      store,
+      store,
+      address,
     );
     // This verifies the prekey signature against the identity key. A directory
     // that swapped a key would fail here rather than quietly succeeding, which
@@ -350,7 +355,11 @@ class SecretChatService {
       }
 
       final SessionCipher cipher = SessionCipher(
-        store, store, store, store, _addressOf(device.deviceId),
+        store,
+        store,
+        store,
+        store,
+        _addressOf(device.deviceId),
       );
       final CiphertextMessage encrypted = await cipher.encrypt(
         Uint8List.fromList(utf8.encode(plaintext)),
@@ -394,7 +403,11 @@ class SecretChatService {
 
       try {
         final SessionCipher cipher = SessionCipher(
-          store, store, store, store, _addressOf(envelope.senderDeviceId),
+          store,
+          store,
+          store,
+          store,
+          _addressOf(envelope.senderDeviceId),
         );
         final Uint8List bytes = base64Decode(envelope.ciphertext);
 
@@ -403,7 +416,8 @@ class SecretChatService {
           // receiving one is how the other side of X3DH completes.
           CiphertextMessage.prekeyType =>
             await cipher.decrypt(PreKeySignalMessage(bytes)),
-          _ => await cipher.decryptFromSignal(SignalMessage.fromSerialized(bytes)),
+          _ =>
+            await cipher.decryptFromSignal(SignalMessage.fromSerialized(bytes)),
         };
 
         opened.add(

@@ -217,8 +217,9 @@ class _Bubble extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
 
     return Align(
-      alignment:
-          message.isMine ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart,
+      alignment: message.isMine
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.sizeOf(context).width *
@@ -231,7 +232,9 @@ class _Bubble extends StatelessWidget {
             vertical: SobhSpacing.sm,
           ),
           decoration: BoxDecoration(
-            color: message.isMine ? palette.bubbleOutgoing : palette.bubbleIncoming,
+            color: message.isMine
+                ? palette.bubbleOutgoing
+                : palette.bubbleIncoming,
             borderRadius: BorderRadius.circular(SobhRadius.lg),
           ),
           child: Column(
@@ -253,7 +256,9 @@ class _Bubble extends StatelessWidget {
                 TextButton.icon(
                   onPressed: onRetry,
                   icon: const Icon(Icons.refresh, size: SobhSizes.iconSmall),
-                  label: Text('${l10n.secretChatSendFailed} · ${l10n.commonRetry}'),
+                  label: Text(
+                    '${l10n.secretChatSendFailed} · ${l10n.commonRetry}',
+                  ),
                 )
               else
                 Row(

@@ -186,6 +186,18 @@ jobs:
         working-directory: apps/${{ matrix.app }}
         run: test -f l10n.yaml && flutter gen-l10n || echo "no l10n.yaml"
 
+      # `flutter gen-l10n` does not emit dart-format-clean output, so the
+      # generated localisations are normalised before the check rather than
+      # failing it. Their style is the generator's business and not something a
+      # contributor can fix; the check below still applies in full to every
+      # authored file.
+      - name: Normalise generated localisations
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          if [ -d lib/core/localization/generated ]; then
+            dart format lib/core/localization/generated
+          fi
+
       - name: Verify formatting
         working-directory: apps/${{ matrix.app }}
         run: dart format --output=none --set-exit-if-changed lib test

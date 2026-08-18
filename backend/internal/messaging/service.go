@@ -28,8 +28,6 @@ const (
 	MaxHistoryPageSize = 200
 )
 
-// Service applies the messaging rules — permissions, slow mode, edit windows,
-// rate limits — on top of the repository.
 // MessageObserver is told about a message once it has been delivered.
 //
 // It exists so the bot platform can see traffic without messaging importing
@@ -40,6 +38,8 @@ type MessageObserver interface {
 	ObserveMessage(ctx context.Context, chatCtx *ChatContext, message *Message)
 }
 
+// Service applies the messaging rules — permissions, slow mode, edit windows,
+// rate limits — on top of the repository.
 type Service struct {
 	repo    *Repository
 	bus     *bus.Bus

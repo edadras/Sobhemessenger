@@ -195,7 +195,9 @@ class SecretChatController extends StateNotifier<SecretConversation> {
   Future<void> retry(SecretMessage message) async {
     state = state.copyWith(
       messages: state.messages
-          .where((SecretMessage m) => m.clientMessageId != message.clientMessageId)
+          .where(
+            (SecretMessage m) => m.clientMessageId != message.clientMessageId,
+          )
           .toList(),
     );
     await send(message.text);
@@ -282,7 +284,10 @@ List<SecretMessage> mergeSecretMessages(
   ];
   // A stable sort, so two messages sharing a timestamp keep the order they
   // were seen in rather than swapping about between rebuilds.
-  mergeSort(merged, compare: (SecretMessage a, SecretMessage b) => a.at.compareTo(b.at));
+  mergeSort(
+    merged,
+    compare: (SecretMessage a, SecretMessage b) => a.at.compareTo(b.at),
+  );
   return merged;
 }
 
@@ -300,16 +305,16 @@ final AutoDisposeStateNotifierProviderFamily<SecretChatController,
     StateNotifierProvider.autoDispose
         .family<SecretChatController, SecretConversation, SecretChatArgs>(
   (Ref ref, SecretChatArgs args) => SecretChatController(
-        service: ref.watch(secretChatServiceProvider),
-        socket: ref.watch(socketClientProvider),
-        chatId: args.chatId,
-        peerUserId: args.peerUserId,
-        // Removed from the stash as it is handed over: it is the only copy,
-        // and leaving it behind would show every message twice on the next
-        // open.
-        alreadyArrived:
-            pendingSecretMessages.remove(args.chatId) ?? const <DecryptedMessage>[],
-      ),
+    service: ref.watch(secretChatServiceProvider),
+    socket: ref.watch(socketClientProvider),
+    chatId: args.chatId,
+    peerUserId: args.peerUserId,
+    // Removed from the stash as it is handed over: it is the only copy,
+    // and leaving it behind would show every message twice on the next
+    // open.
+    alreadyArrived:
+        pendingSecretMessages.remove(args.chatId) ?? const <DecryptedMessage>[],
+  ),
 );
 
 /// Identifies a conversation. Riverpod families compare arguments by equality,

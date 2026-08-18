@@ -204,8 +204,7 @@ void main() {
       // The first message starts the session, so it is a pre-key message.
       expect(encrypted.getType(), CiphertextMessage.prekeyType);
 
-      final String opened =
-          await _decrypt(bob, alice.address, encrypted);
+      final String opened = await _decrypt(bob, alice.address, encrypted);
       expect(opened, 'سلام، این یک پیام مخفی است');
     });
 
@@ -223,7 +222,11 @@ void main() {
 
       const String secret = 'the account number is 12345';
       final SessionCipher cipher = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       final CiphertextMessage encrypted = await cipher.encrypt(
         Uint8List.fromList(utf8.encode(secret)),
@@ -249,7 +252,11 @@ void main() {
       );
 
       final SessionCipher cipher = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       final CiphertextMessage first = await cipher.encrypt(
         Uint8List.fromList(utf8.encode('same words')),
@@ -272,7 +279,11 @@ void main() {
       );
 
       final SessionCipher aliceToBob = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       // Bob has to open Alice's first message before he can reply: that is what
       // establishes his side of the session.
@@ -283,7 +294,11 @@ void main() {
       );
 
       final SessionCipher bobToAlice = SessionCipher(
-        bob.store, bob.store, bob.store, bob.store, alice.address,
+        bob.store,
+        bob.store,
+        bob.store,
+        bob.store,
+        alice.address,
       );
       final CiphertextMessage reply = await bobToAlice.encrypt(
         Uint8List.fromList(utf8.encode('سلام، حالت چطور است؟')),
@@ -310,7 +325,11 @@ void main() {
       );
 
       final SessionCipher cipher = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       final CiphertextMessage first = await cipher.encrypt(
         Uint8List.fromList(utf8.encode('first')),
@@ -342,7 +361,11 @@ void main() {
       );
 
       final SessionCipher cipher = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       final CiphertextMessage forBob = await cipher.encrypt(
         Uint8List.fromList(utf8.encode('for bob only')),
@@ -380,10 +403,18 @@ void main() {
       );
 
       final SessionCipher aliceCipher = SessionCipher(
-        alice.store, alice.store, alice.store, alice.store, bob.address,
+        alice.store,
+        alice.store,
+        alice.store,
+        alice.store,
+        bob.address,
       );
       final SessionCipher bobCipher = SessionCipher(
-        bob.store, bob.store, bob.store, bob.store, alice.address,
+        bob.store,
+        bob.store,
+        bob.store,
+        bob.store,
+        alice.address,
       );
 
       // Alice's opening message establishes the session on Bob's side.

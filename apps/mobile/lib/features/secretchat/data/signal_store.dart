@@ -128,8 +128,7 @@ class SecureSignalStore implements SignalProtocolStore {
   }
 
   @override
-  Future<void> storePreKey(int preKeyId, PreKeyRecord record) =>
-      _storage.write(
+  Future<void> storePreKey(int preKeyId, PreKeyRecord record) => _storage.write(
         key: _preKeyKey(preKeyId),
         value: base64Encode(record.serialize()),
       );
@@ -203,8 +202,7 @@ class SecureSignalStore implements SignalProtocolStore {
     return <int>[
       for (final String key in all.keys)
         if (key.startsWith(prefix))
-          if (int.tryParse(key.substring(prefix.length)) case final int id)
-            id,
+          if (int.tryParse(key.substring(prefix.length)) case final int id) id,
     ];
   }
 

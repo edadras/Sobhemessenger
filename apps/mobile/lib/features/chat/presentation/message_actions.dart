@@ -145,7 +145,14 @@ Future<void> _setPinned(
 /// A fixed row rather than a full picker: it is one tap for the reactions
 /// people actually use, and a keyboard for the rest is a separate piece of work
 /// that should not hold up having any reactions at all.
-const List<String> quickReactions = <String>['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const List<String> quickReactions = <String>[
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '😢',
+  '🙏',
+];
 
 Future<void> _react(
   BuildContext context,

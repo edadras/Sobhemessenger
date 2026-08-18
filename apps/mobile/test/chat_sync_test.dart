@@ -10,8 +10,7 @@ import 'package:sobh_app/core/storage/local_database.dart';
 /// must not lose what this device knows that the server does not, and pruning
 /// must never remove a conversation that still exists.
 
-LocalDatabase _database() =>
-    LocalDatabase.forTesting(NativeDatabase.memory());
+LocalDatabase _database() => LocalDatabase.forTesting(NativeDatabase.memory());
 
 ChatsCompanion _chat(
   String id, {

@@ -1307,3 +1307,59 @@ func TestSecretChatMessagesAreNeverQueuedForSearch(t *testing.T) {
 		// Nothing queued, which is the point.
 	}
 }
+
+func TestPinningWorksInAOneToOneChat(t *testing.T) {
+	// A private chat has no hierarchy: both people join as members, and members
+	// were denied pinning because the permission set was written for groups.
+	// The result was that nobody at all could pin in a private conversation.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID, _, err := messaging.NewRepository(db).EnsurePrivateChat(ctx, alice, bob)
+	if err != nil {
+		t.Fatalf("EnsurePrivateChat: %v", err)
+	}
+
+	sent, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "worth keeping",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if err := service.SetPinned(ctx, sent.ID, alice, true); err != nil {
+		t.Fatalf("the sender could not pin in their own private chat: %v", err)
+	}
+	// And the other party too — neither of them is an owner, so if pinning
+	// depended on rank it would work for nobody.
+	if err := service.SetPinned(ctx, sent.ID, bob, false); err != nil {
+		t.Fatalf("the other party could not unpin: %v", err)
+	}
+}
+
+func TestOrdinaryGroupMembersStillCannotPin(t *testing.T) {
+	// The fix must not hand every group member the moderator's permissions.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID := groupChat(t, db, alice, bob)
+
+	sent, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "in a group",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if err := service.SetPinned(ctx, sent.ID, bob, true); err == nil {
+		t.Error("an ordinary group member pinned a message, want a refusal")
+	}
+}

@@ -69,10 +69,10 @@ const (
 
 // KeyBundle is what a device publishes so others can start a session with it.
 type KeyBundle struct {
-	DeviceID        uuid.UUID `json:"device_id"`
-	UserID          uuid.UUID `json:"user_id"`
-	RegistrationID  int       `json:"registration_id"`
-	IdentityKey     string    `json:"identity_key"`
+	DeviceID       uuid.UUID `json:"device_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	RegistrationID int       `json:"registration_id"`
+	IdentityKey    string    `json:"identity_key"`
 	// SignedPrekeyID names which signed prekey the bundle carries. A session
 	// initiator quotes it back, and the recipient looks it up to derive the
 	// same secret — without it the first message of a conversation cannot be

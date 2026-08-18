@@ -183,7 +183,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // person is told someone is typing who has closed the conversation.
     if (_typing) {
       unawaited(
-        ref.read(chatRepositoryProvider).setTyping(widget.chatId, typing: false),
+        ref
+            .read(chatRepositoryProvider)
+            .setTyping(widget.chatId, typing: false),
       );
     }
     _composer.removeListener(_onComposerChanged);

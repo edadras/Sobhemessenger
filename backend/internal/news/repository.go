@@ -461,21 +461,32 @@ type FeedQuery struct {
 // can outrank last week's most-read piece; the alternative — raw view counts —
 // would freeze the top of the feed permanently.
 func (r *Repository) Feed(ctx context.Context, q FeedQuery) ([]Article, error) {
-	var (
-		order  string
-		filter string
+	// Placeholders are numbered from the argument list as it is built, rather
+	// than fixed in advance. The earlier version always passed six arguments
+	// but only mentioned $5 and $6 when the category and tag filters were
+	// added, so PostgreSQL rejected the ordinary feed — every mode without both
+	// filters — with "expected 4 arguments, got 6". Keeping the two in step is
+	// the only way this stays correct as filters are added.
+	args := []any{q.Locale, q.Before, q.Limit, q.ViewerID}
+	const (
+		locale = "$1"
+		before = "$2"
+		limit  = "$3"
+		viewer = "$4"
 	)
+
+	var order, filter string
 	switch q.Mode {
 	case "popular":
 		order = `ORDER BY (a.view_count / (1 + EXTRACT(EPOCH FROM (now() - a.published_at)) / 3600)) DESC,
 		         a.published_at DESC`
 	case "following":
 		filter = `AND (
-			a.category_id IN (SELECT category_id FROM news_follows WHERE user_id = $4 AND category_id IS NOT NULL)
-			OR a.author_id IN (SELECT author_id FROM news_follows WHERE user_id = $4 AND author_id IS NOT NULL)
+			a.category_id IN (SELECT category_id FROM news_follows WHERE user_id = ` + viewer + ` AND category_id IS NOT NULL)
+			OR a.author_id IN (SELECT author_id FROM news_follows WHERE user_id = ` + viewer + ` AND author_id IS NOT NULL)
 			OR EXISTS (
 				SELECT 1 FROM news_article_tags at
-				JOIN news_follows f ON f.tag_id = at.tag_id AND f.user_id = $4
+				JOIN news_follows f ON f.tag_id = at.tag_id AND f.user_id = ` + viewer + `
 				WHERE at.article_id = a.id))`
 		order = `ORDER BY a.published_at DESC`
 	case "breaking":
@@ -486,13 +497,15 @@ func (r *Repository) Feed(ctx context.Context, q FeedQuery) ([]Article, error) {
 	}
 
 	if q.CategoryID != nil {
-		filter += ` AND a.category_id = $5`
+		args = append(args, *q.CategoryID)
+		filter += fmt.Sprintf(` AND a.category_id = $%d`, len(args))
 	}
 	if q.Tag != "" {
-		filter += ` AND EXISTS (
+		args = append(args, q.Tag)
+		filter += fmt.Sprintf(` AND EXISTS (
 			SELECT 1 FROM news_article_tags at
-			JOIN news_tags t ON t.id = at.tag_id AND t.slug = $6
-			WHERE at.article_id = a.id)`
+			JOIN news_tags t ON t.id = at.tag_id AND t.slug = $%d
+			WHERE at.article_id = a.id)`, len(args))
 	}
 
 	query := `
@@ -500,16 +513,15 @@ func (r *Repository) Feed(ctx context.Context, q FeedQuery) ([]Article, error) {
 		       (b.user_id IS NOT NULL) AS is_bookmarked
 		FROM news_articles a
 		LEFT JOIN news_authors au ON au.id = a.author_id
-		LEFT JOIN news_category_names cn ON cn.category_id = a.category_id AND cn.locale = $1
-		LEFT JOIN news_bookmarks b ON b.article_id = a.id AND b.user_id = $4
+		LEFT JOIN news_category_names cn ON cn.category_id = a.category_id AND cn.locale = ` + locale + `
+		LEFT JOIN news_bookmarks b ON b.article_id = a.id AND b.user_id = ` + viewer + `
 		WHERE a.status = 'published'
-		  AND ($2::timestamptz IS NULL OR a.published_at < $2)
+		  AND (` + before + `::timestamptz IS NULL OR a.published_at < ` + before + `)
 		  ` + filter + `
 		` + order + `
-		LIMIT $3`
+		LIMIT ` + limit
 
-	rows, err := r.db.Pool.Query(ctx, query,
-		q.Locale, q.Before, q.Limit, q.ViewerID, q.CategoryID, q.Tag)
+	rows, err := r.db.Pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("news: feed: %w", err)
 	}
