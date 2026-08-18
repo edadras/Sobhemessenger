@@ -37,3 +37,6 @@ apps/*/lib/core/localization/generated/
 
 # The k6 run writes its summary next to the working directory.
 loadtest-summary.json
+
+# Redis writes its snapshot into whatever directory it was started from.
+dump.rdb
