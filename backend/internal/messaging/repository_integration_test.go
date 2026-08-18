@@ -537,7 +537,7 @@ func TestOneToOneChatsCarryTheirPeer(t *testing.T) {
 		t.Fatalf("EnsurePrivateChat: %v", err)
 	}
 
-	chats, err := repo.ListChats(ctx, alice, 50, nil)
+	chats, err := repo.ListChats(ctx, messaging.ChatListQuery{UserID: alice, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestOneToOneChatsCarryTheirPeer(t *testing.T) {
 	}
 
 	// And the same chat from Bob's side names Alice, not himself.
-	fromBob, err := repo.ListChats(ctx, bob, 50, nil)
+	fromBob, err := repo.ListChats(ctx, messaging.ChatListQuery{UserID: bob, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListChats for bob: %v", err)
 	}
@@ -600,7 +600,7 @@ func TestGroupChatsHaveNoPeer(t *testing.T) {
 		t.Fatalf("add group members: %v", err)
 	}
 
-	chats, err := repo.ListChats(ctx, alice, 50, nil)
+	chats, err := repo.ListChats(ctx, messaging.ChatListQuery{UserID: alice, Limit: 50})
 	if err != nil {
 		t.Fatalf("ListChats: %v", err)
 	}

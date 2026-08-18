@@ -429,11 +429,13 @@ func (s *Service) checkSendPermission(chatCtx *ChatContext, in SendInput) error 
 }
 
 // ListChats returns the caller's conversation list.
-func (s *Service) ListChats(ctx context.Context, userID uuid.UUID, limit int, before *time.Time) ([]Chat, error) {
+func (s *Service) ListChats(ctx context.Context, userID uuid.UUID, limit int, before *time.Time, folderID *uuid.UUID) ([]Chat, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	chats, err := s.repo.ListChats(ctx, userID, limit, before)
+	chats, err := s.repo.ListChats(ctx, ChatListQuery{
+		UserID: userID, Limit: limit, Before: before, FolderID: folderID,
+	})
 	if err != nil {
 		return nil, httpx.Internal(err)
 	}

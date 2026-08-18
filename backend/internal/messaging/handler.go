@@ -34,6 +34,17 @@ func (h *Handler) RegisterChatRoutes(r chi.Router) {
 	r.Put("/{chatID}/draft", h.setDraft)
 	r.Post("/{chatID}/typing", h.typing)
 	r.Post("/{chatID}/clear-history", h.clearHistory)
+
+	// Folders sit on the chats router because they are a view of the chat
+	// list. The literal segment cannot be mistaken for a chat id: chi matches
+	// a static path before a parameter.
+	r.Get("/folders", h.folders)
+	r.Post("/folders", h.createFolder)
+	r.Put("/folders/order", h.reorderFolders)
+	r.Patch("/folders/{folderID}", h.updateFolder)
+	r.Delete("/folders/{folderID}", h.deleteFolder)
+	r.Put("/folders/{folderID}/chats/{chatID}", h.setFolderChat)
+	r.Delete("/folders/{folderID}/chats/{chatID}", h.removeFolderChat)
 }
 
 // RegisterMessageRoutes adds the per-message routes to a shared router, so
@@ -68,7 +79,19 @@ func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
 		before = &parsed
 	}
 
-	chats, err := h.service.ListChats(r.Context(), principal.UserID, limit, before)
+	// A folder is a view of the same list, so it is a parameter here rather
+	// than a second endpoint that would have to be kept in step with this one.
+	var folderID *uuid.UUID
+	if raw := r.URL.Query().Get("folder_id"); raw != "" {
+		parsed, parseErr := uuid.Parse(raw)
+		if parseErr != nil {
+			httpx.Fail(w, r, httpx.BadRequest("folder_id must be a UUID"))
+			return
+		}
+		folderID = &parsed
+	}
+
+	chats, err := h.service.ListChats(r.Context(), principal.UserID, limit, before, folderID)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -442,4 +465,183 @@ func queryInt(r *http.Request, name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+// ---------------------------------------------------------------- folders
+
+// folderBody is the whole folder, because that is how it is edited: one small
+// object on one screen. A partial update of a filter is harder to reason about
+// than replacing it.
+type folderBody struct {
+	Title              string `json:"title"`
+	Emoji              string `json:"emoji,omitempty"`
+	Position           int    `json:"position,omitempty"`
+	IncludeContacts    bool   `json:"include_contacts,omitempty"`
+	IncludeNonContacts bool   `json:"include_non_contacts,omitempty"`
+	IncludeGroups      bool   `json:"include_groups,omitempty"`
+	IncludeChannels    bool   `json:"include_channels,omitempty"`
+	IncludeBots        bool   `json:"include_bots,omitempty"`
+	ExcludeMuted       bool   `json:"exclude_muted,omitempty"`
+	ExcludeRead        bool   `json:"exclude_read,omitempty"`
+	ExcludeArchived    bool   `json:"exclude_archived,omitempty"`
+}
+
+func (b folderBody) input() FolderInput {
+	return FolderInput{
+		Title: b.Title, Emoji: b.Emoji, Position: b.Position,
+		IncludeContacts: b.IncludeContacts, IncludeNonContacts: b.IncludeNonContacts,
+		IncludeGroups: b.IncludeGroups, IncludeChannels: b.IncludeChannels,
+		IncludeBots: b.IncludeBots, ExcludeMuted: b.ExcludeMuted,
+		ExcludeRead: b.ExcludeRead, ExcludeArchived: b.ExcludeArchived,
+	}
+}
+
+func (h *Handler) folders(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	folders, err := h.service.Folders(r.Context(), principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"folders": folders})
+}
+
+func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body folderBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	folderID, err := h.service.CreateFolder(r.Context(), principal.UserID, body.input())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, map[string]any{"folder_id": folderID})
+}
+
+func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request) {
+	principal, folderID, err := h.folderContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body folderBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.UpdateFolder(r.Context(), principal.UserID, folderID, body.input()); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) deleteFolder(w http.ResponseWriter, r *http.Request) {
+	principal, folderID, err := h.folderContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.DeleteFolder(r.Context(), principal.UserID, folderID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) setFolderChat(w http.ResponseWriter, r *http.Request) {
+	principal, folderID, err := h.folderContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	chatID, err := pathUUID(r, "chatID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if body.Mode == "" {
+		body.Mode = "include"
+	}
+
+	if err := h.service.SetFolderChat(r.Context(), principal.UserID, folderID, chatID, body.Mode); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) removeFolderChat(w http.ResponseWriter, r *http.Request) {
+	principal, folderID, err := h.folderContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	chatID, err := pathUUID(r, "chatID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.RemoveFolderChat(r.Context(), principal.UserID, folderID, chatID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) reorderFolders(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Order []uuid.UUID `json:"order"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.ReorderFolders(r.Context(), principal.UserID, body.Order); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) folderContext(r *http.Request) (*httpx.Principal, uuid.UUID, error) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	folderID, err := pathUUID(r, "folderID")
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	return principal, folderID, nil
 }

@@ -240,7 +240,21 @@ func (r *Repository) ensureSelfChat(ctx context.Context, userID uuid.UUID) (uuid
 }
 
 // ListChats returns the caller's chat list, most recently active first.
-func (r *Repository) ListChats(ctx context.Context, userID uuid.UUID, limit int, before *time.Time) ([]Chat, error) {
+// ChatListQuery narrows the chat list.
+//
+// FolderID is a struct field rather than a fourth positional argument because
+// the folder filter is the sort of thing that grows — and a call site reading
+// `ListChats(ctx, id, 50, nil, nil)` says nothing about which nil is which.
+type ChatListQuery struct {
+	UserID uuid.UUID
+	Limit  int
+	Before *time.Time
+	// FolderID narrows the list to one saved filter. Nil is the main list,
+	// which shows everything including chats no folder matches.
+	FolderID *uuid.UUID
+}
+
+func (r *Repository) ListChats(ctx context.Context, q ChatListQuery) ([]Chat, error) {
 	// The LATERAL resolves the other person in a one-to-one chat. Such a chat
 	// has no title of its own, so without this every private and secret
 	// conversation arrives nameless and each client has to work out which
@@ -268,8 +282,17 @@ func (r *Repository) ListChats(ctx context.Context, userID uuid.UUID, limit int,
 		) peer ON c.type IN ('private', 'secret')
 		WHERE m.user_id = $1 AND m.left_at IS NULL AND c.deleted_at IS NULL
 		  AND ($3::timestamptz IS NULL OR c.last_message_at < $3)
+		  -- A folder is a saved filter, so narrowing by one is a WHERE clause
+		  -- rather than a different query. The predicate is shared with the
+		  -- badge count, because a folder's list and its badge disagreeing
+		  -- about what it contains is exactly the bug that would follow from
+		  -- writing it twice.
+		  AND ($4::uuid IS NULL OR EXISTS (
+		      SELECT 1 FROM chat_folders f
+		      WHERE f.id = $4 AND f.owner_id = $1 AND (`+folderPredicate+`)
+		  ))
 		ORDER BY m.is_pinned DESC, c.last_message_at DESC NULLS LAST, c.created_at DESC
-		LIMIT $2`, userID, limit, before)
+		LIMIT $2`, q.UserID, q.Limit, q.Before, q.FolderID)
 	if err != nil {
 		return nil, fmt.Errorf("messaging: list chats: %w", err)
 	}

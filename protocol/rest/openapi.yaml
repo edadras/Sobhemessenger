@@ -458,6 +458,14 @@ paths:
           in: query
           description: RFC3339 timestamp cursor from `meta.next_cursor`.
           schema: { type: string, format: date-time }
+        - name: folder_id
+          in: query
+          description: >
+            Narrow the list to one chat folder. A folder is a view of the same
+            list, so it is a parameter here rather than a second endpoint that
+            would have to be kept in step with this one. Absent means the main
+            list, which shows everything.
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Chat list, pinned first then most recently active
@@ -665,6 +673,126 @@ paths:
                 typing: { type: boolean }
       responses:
         "200": { description: Broadcast }
+
+  /api/v1/chats/folders:
+    get:
+      tags: [Chats]
+      summary: List chat folders
+      description: >
+        A folder is a saved filter over the chat list, not a container: a chat
+        can appear in several, and putting one in a folder does not take it out
+        of the main list. Each entry carries the badge count for what it
+        currently matches.
+      responses:
+        "200":
+          description: The folders, in tab order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          folders:
+                            type: array
+                            items: { $ref: "#/components/schemas/ChatFolder" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Chats]
+      summary: Create a chat folder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatFolderInput" }
+      responses:
+        "201":
+          description: The new folder's id
+        "409": { description: The folder limit is reached, or that name is taken }
+
+  /api/v1/chats/folders/order:
+    put:
+      tags: [Chats]
+      summary: Reorder the folder tabs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "200": { description: Reordered }
+
+  /api/v1/chats/folders/{folderID}:
+    patch:
+      tags: [Chats]
+      summary: Replace a folder's definition
+      description: >
+        The whole folder is sent, because that is how it is edited — one small
+        object on one screen. A partial update of a filter is harder to reason
+        about than replacing it.
+      parameters:
+        - { name: folderID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatFolderInput" }
+      responses:
+        "200": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: That name is taken }
+    delete:
+      tags: [Chats]
+      summary: Delete a folder
+      description: The chats are untouched — they were never in it in any sense that could be lost.
+      parameters:
+        - { name: folderID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/folders/{folderID}/chats/{chatID}:
+    put:
+      tags: [Chats]
+      summary: Pin a chat into a folder, or keep it out of one
+      description: >
+        `include` puts the chat in whatever the rules say; `exclude` keeps it
+        out whatever they say — the only way to express "all my groups except
+        that one". A chat is never both, so setting one mode replaces the
+        other.
+      parameters:
+        - { name: folderID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/ChatID" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [include, exclude], default: include }
+      responses:
+        "200": { description: Set }
+        "403": { description: You are not a member of that chat }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: The folder already names as many chats as it may }
+    delete:
+      tags: [Chats]
+      summary: Drop a chat's entry, leaving the rules to decide again
+      parameters:
+        - { name: folderID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "200": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/chats/{chatID}/clear-history:
     post:
@@ -5767,6 +5895,52 @@ components:
         is_forum:
           type: boolean
           description: Groups only, read-only. Whether the group files its messages under topics.
+
+    ChatFolder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        emoji: { type: string }
+        position: { type: integer }
+        include_contacts: { type: boolean }
+        include_non_contacts: { type: boolean }
+        include_groups: { type: boolean }
+        include_channels: { type: boolean }
+        include_bots: { type: boolean }
+        exclude_muted: { type: boolean }
+        exclude_read: { type: boolean }
+        exclude_archived: { type: boolean }
+        included_chat_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Pinned in whatever the rules say.
+        excluded_chat_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Kept out whatever the rules say.
+        unread_count:
+          type: integer
+          description: The tab badge — the total across the chats this folder currently matches.
+        chat_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ChatFolderInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 64 }
+        emoji: { type: string }
+        position: { type: integer }
+        include_contacts: { type: boolean }
+        include_non_contacts: { type: boolean }
+        include_groups: { type: boolean }
+        include_channels: { type: boolean }
+        include_bots: { type: boolean }
+        exclude_muted: { type: boolean }
+        exclude_read: { type: boolean }
+        exclude_archived: { type: boolean, default: true }
 
     ContactRequest:
       type: object
