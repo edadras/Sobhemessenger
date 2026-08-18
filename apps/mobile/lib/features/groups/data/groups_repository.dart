@@ -252,6 +252,113 @@ class GroupsRepository {
         '/chats/$chatId/join-requests/$userId',
         body: <String, dynamic>{'approve': approve},
       );
+
+  Future<ChatSettings> settings(String chatId) async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/chats/$chatId/settings');
+    return ChatSettings.fromJson(data);
+  }
+
+  Future<void> updateSettings(String chatId, ChatSettings settings) =>
+      _api.put<dynamic>('/chats/$chatId/settings', body: settings.toJson());
+}
+
+/// The administrative knobs on a group or channel (§14, §15).
+///
+/// The type-specific fields are nullable and omitted when absent, which is
+/// what makes an update that never mentions them leave them alone. A whole
+/// object that sent `false` for a setting it had never heard of would switch
+/// off commenting on every channel it touched.
+class ChatSettings {
+  const ChatSettings({
+    this.slowModeSeconds = 0,
+    this.historyVisibleToNew = true,
+    this.joinRequiresApproval = false,
+    this.maxMembers = 200000,
+    this.autoDeleteSeconds = 0,
+    this.signatureEnabled,
+    this.commentsEnabled,
+    this.discussionChatId,
+    this.stickerSet,
+    this.linkedChannelId,
+    this.isForum,
+    this.isBroadcast,
+  });
+
+  factory ChatSettings.fromJson(Map<String, dynamic> json) => ChatSettings(
+        slowModeSeconds: (json['slow_mode_seconds'] as num?)?.toInt() ?? 0,
+        historyVisibleToNew: json['history_visible_to_new'] as bool? ?? true,
+        joinRequiresApproval: json['join_requires_approval'] as bool? ?? false,
+        maxMembers: (json['max_members'] as num?)?.toInt() ?? 200000,
+        autoDeleteSeconds: (json['auto_delete_seconds'] as num?)?.toInt() ?? 0,
+        signatureEnabled: json['signature_enabled'] as bool?,
+        commentsEnabled: json['comments_enabled'] as bool?,
+        discussionChatId: json['discussion_chat_id'] as String?,
+        stickerSet: json['sticker_set'] as String?,
+        linkedChannelId: json['linked_channel_id'] as String?,
+        isForum: json['is_forum'] as bool?,
+        isBroadcast: json['is_broadcast'] as bool?,
+      );
+
+  final int slowModeSeconds;
+  final bool historyVisibleToNew;
+  final bool joinRequiresApproval;
+  final int maxMembers;
+  final int autoDeleteSeconds;
+
+  /// Channels only: put the posting admin's name on each post.
+  final bool? signatureEnabled;
+
+  /// Channels only: whether readers may comment, which only does anything
+  /// once a discussion group is linked.
+  final bool? commentsEnabled;
+
+  /// Channels only, read-only. Linking has its own endpoint because it needs
+  /// authority over both chats.
+  final String? discussionChatId;
+
+  /// Groups only: the slug of the group's own sticker set.
+  final String? stickerSet;
+
+  /// Groups only, read-only.
+  final String? linkedChannelId;
+  final bool? isForum;
+
+  /// Groups only: only staff may post.
+  final bool? isBroadcast;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'slow_mode_seconds': slowModeSeconds,
+        'history_visible_to_new': historyVisibleToNew,
+        'join_requires_approval': joinRequiresApproval,
+        'max_members': maxMembers,
+        'auto_delete_seconds': autoDeleteSeconds,
+        if (signatureEnabled != null) 'signature_enabled': signatureEnabled,
+        if (commentsEnabled != null) 'comments_enabled': commentsEnabled,
+        if (stickerSet != null) 'sticker_set': stickerSet,
+        if (isBroadcast != null) 'is_broadcast': isBroadcast,
+      };
+
+  ChatSettings copyWith({
+    bool? signatureEnabled,
+    bool? commentsEnabled,
+    String? stickerSet,
+    bool? isBroadcast,
+  }) =>
+      ChatSettings(
+        slowModeSeconds: slowModeSeconds,
+        historyVisibleToNew: historyVisibleToNew,
+        joinRequiresApproval: joinRequiresApproval,
+        maxMembers: maxMembers,
+        autoDeleteSeconds: autoDeleteSeconds,
+        signatureEnabled: signatureEnabled ?? this.signatureEnabled,
+        commentsEnabled: commentsEnabled ?? this.commentsEnabled,
+        discussionChatId: discussionChatId,
+        stickerSet: stickerSet ?? this.stickerSet,
+        linkedChannelId: linkedChannelId,
+        isForum: isForum,
+        isBroadcast: isBroadcast ?? this.isBroadcast,
+      );
 }
 
 final Provider<GroupsRepository> groupsRepositoryProvider =
@@ -275,4 +382,10 @@ final FutureProviderFamily<List<JoinRequest>, String> joinRequestsProvider =
     FutureProvider.family<List<JoinRequest>, String>(
   (Ref ref, String chatId) =>
       ref.watch(groupsRepositoryProvider).joinRequests(chatId),
+);
+
+final FutureProviderFamily<ChatSettings, String> chatSettingsProvider =
+    FutureProvider.family<ChatSettings, String>(
+  (Ref ref, String chatId) =>
+      ref.watch(groupsRepositoryProvider).settings(chatId),
 );

@@ -430,6 +430,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       chatMessagesProvider(widget.chatId),
     );
     final String? currentUserId = ref.watch(sessionControllerProvider).userId;
+    // The chat's type decides which actions a message offers — commenting
+    // belongs to a channel post and nothing else. It comes from the local row
+    // rather than a fetch, so a long press never waits on the network.
+    final String chatType = ref
+            .watch(chatListProvider)
+            .valueOrNull
+            ?.where((ChatRow row) => row.id == widget.chatId)
+            .firstOrNull
+            ?.type ??
+        '';
 
     // Reading is acknowledged whenever the conversation changes underneath the
     // screen, which covers both opening it and a message arriving while it is
@@ -528,8 +538,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 itemBuilder: (BuildContext context, int index) {
                   final MessageRow message = rows[rows.length - 1 - index];
                   return GestureDetector(
-                    onLongPress: () =>
-                        showMessageActions(context, ref, message),
+                    onLongPress: () => showMessageActions(
+                      context,
+                      ref,
+                      message,
+                      chatType: chatType,
+                    ),
                     child: _MessageBubble(
                       message: message,
                       isOutgoing: message.senderId == null ||

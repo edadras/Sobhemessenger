@@ -80,6 +80,15 @@ class SettingsScreen extends ConsumerWidget {
               MaterialPageRoute<void>(builder: (_) => const SessionsScreen()),
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.alternate_email),
+            title: Text(l10n.recoveryEmailTitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const RecoveryEmailScreen(),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -401,4 +410,163 @@ class _SectionHeader extends StatelessWidget {
               ?.copyWith(color: SobhTheme.of(context).textSecondary),
         ),
       );
+}
+
+/// The recovery address on the account (§4).
+///
+/// Enrolling an address is not the same as having one: it does nothing at all
+/// until a code proves it, which is what stops a stolen session from adding a
+/// second way in that the owner never confirmed. The screen says so rather
+/// than leaving an unverified address looking like protection.
+class RecoveryEmailScreen extends ConsumerStatefulWidget {
+  const RecoveryEmailScreen({super.key});
+
+  @override
+  ConsumerState<RecoveryEmailScreen> createState() =>
+      _RecoveryEmailScreenState();
+}
+
+class _RecoveryEmailScreenState extends ConsumerState<RecoveryEmailScreen> {
+  final TextEditingController _email = TextEditingController();
+  final TextEditingController _code = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<void> Function() action, String success) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    setState(() => _busy = true);
+
+    try {
+      await action();
+      ref.invalidate(recoveryEmailProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(success)));
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error.isOffline ? l10n.errorNetwork : error.message,
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final AsyncValue<RecoveryEmail> status = ref.watch(recoveryEmailProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.recoveryEmailTitle)),
+      body: status.when(
+        loading: () => const SobhLoading(),
+        error: (Object error, StackTrace _) => SobhErrorState(
+          error: error,
+          onRetry: () => ref.invalidate(recoveryEmailProvider),
+        ),
+        data: (RecoveryEmail recovery) {
+          if (!recovery.available) {
+            return Padding(
+              padding: const EdgeInsets.all(SobhSpacing.xl),
+              child: Text(
+                l10n.recoveryEmailUnavailable,
+                textAlign: TextAlign.center,
+              ),
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(SobhSpacing.lg),
+            children: <Widget>[
+              Text(l10n.recoveryEmailBody),
+              const SizedBox(height: SobhSpacing.lg),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  recovery.isSet ? recovery.email : l10n.recoveryEmailNotSet,
+                ),
+                subtitle: Text(
+                  !recovery.isSet
+                      ? ''
+                      : recovery.verified
+                          ? l10n.recoveryEmailVerified
+                          : l10n.recoveryEmailUnverified,
+                ),
+                trailing: recovery.isSet
+                    ? IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: l10n.recoveryEmailRemove,
+                        onPressed: _busy
+                            ? null
+                            : () => _run(
+                                  ref
+                                      .read(accountRepositoryProvider)
+                                      .removeRecoveryEmail,
+                                  l10n.recoveryEmailNotSet,
+                                ),
+                      )
+                    : null,
+              ),
+              const Divider(),
+              TextField(
+                controller: _email,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(labelText: l10n.recoveryEmailHint),
+              ),
+              const SizedBox(height: SobhSpacing.sm),
+              FilledButton(
+                onPressed: _busy
+                    ? null
+                    : () => _run(
+                          () => ref
+                              .read(accountRepositoryProvider)
+                              .setRecoveryEmail(_email.text.trim()),
+                          l10n.recoveryEmailCodeSent,
+                        ),
+                child: Text(l10n.commonSave),
+              ),
+              // The code box is offered whenever an address is enrolled but
+              // unproved, which is exactly when it is useful.
+              if (recovery.isSet && !recovery.verified) ...<Widget>[
+                const SizedBox(height: SobhSpacing.lg),
+                TextField(
+                  controller: _code,
+                  keyboardType: TextInputType.number,
+                  decoration:
+                      InputDecoration(labelText: l10n.recoveryEmailCodeHint),
+                ),
+                const SizedBox(height: SobhSpacing.sm),
+                FilledButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _run(
+                            () => ref
+                                .read(accountRepositoryProvider)
+                                .verifyRecoveryEmail(_code.text.trim()),
+                            l10n.recoveryEmailVerified,
+                          ),
+                  child: Text(l10n.commonContinue),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
 }

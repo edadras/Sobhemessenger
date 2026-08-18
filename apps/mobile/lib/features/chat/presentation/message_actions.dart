@@ -8,15 +8,23 @@ import '../../../core/storage/local_database.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../auth/session_controller.dart';
+import '../../groups/presentation/comments_sheet.dart';
 import '../data/chat_repository.dart';
 import '../data/organise_repository.dart';
 
 /// What a long press on a message offers (§12).
+///
+/// [chatType] decides whether commenting is offered. Comments belong to a
+/// channel post and nothing else, and a channel with no discussion group says
+/// so when the sheet is opened rather than hiding the option — the reader
+/// cannot tell the difference from the outside, and a silently missing action
+/// reads as a broken app.
 Future<void> showMessageActions(
   BuildContext context,
   WidgetRef ref,
-  MessageRow message,
-) async {
+  MessageRow message, {
+  String chatType = '',
+}) async {
   final AppLocalizations l10n = AppLocalizations.of(context);
   final SobhPalette palette = SobhTheme.of(context);
 
@@ -68,6 +76,19 @@ Future<void> showMessageActions(
               onTap: () {
                 Navigator.of(sheet).pop();
                 _setPinned(context, ref, message, !message.isPinned);
+              },
+            ),
+          if (isSent && chatType == 'channel')
+            ListTile(
+              leading: const Icon(Icons.mode_comment_outlined),
+              title: Text(l10n.commentsTitle),
+              onTap: () {
+                Navigator.of(sheet).pop();
+                CommentsSheet.show(
+                  context,
+                  channelId: message.chatId,
+                  postId: message.id,
+                );
               },
             ),
           if (isSent)

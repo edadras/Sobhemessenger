@@ -16,6 +16,8 @@ import '../../auth/session_controller.dart';
 import '../../secretchat/presentation/secret_chat_screen.dart';
 import '../../stories/presentation/stories_tray.dart';
 import '../data/chat_repository.dart';
+import '../data/folders_repository.dart';
+import 'folders_screen.dart';
 
 /// The conversation list (§48).
 class ChatListScreen extends ConsumerStatefulWidget {
@@ -57,6 +59,27 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
 
   ApiException? _failure;
 
+  /// Narrows the streamed rows to the selected folder.
+  ///
+  /// While the folder's membership is still loading the full list is shown
+  /// rather than an empty one: a list that blinks empty on every folder tap
+  /// reads as "you have no chats", which is never true.
+  List<ChatRow> _inSelectedFolder(List<ChatRow> rows) {
+    final String? folderId = ref.watch(selectedFolderProvider);
+    if (folderId == null) {
+      return rows;
+    }
+    final Set<String>? ids =
+        ref.watch(folderChatIdsProvider(folderId)).valueOrNull;
+    if (ids == null) {
+      return rows;
+    }
+    return <ChatRow>[
+      for (final ChatRow row in rows)
+        if (ids.contains(row.id)) row,
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
@@ -66,6 +89,13 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
       appBar: AppBar(
         title: Text(l10n.navChats),
         actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.folder_outlined),
+            tooltip: l10n.foldersManage,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const FoldersScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: l10n.searchTitle,
@@ -82,6 +112,9 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
             padding: EdgeInsets.symmetric(vertical: SobhSpacing.sm),
             child: StoriesTray(),
           ),
+          // The folder strip collapses to nothing when there are no folders,
+          // so somebody who has never made one sees the list they always saw.
+          const _FolderTabs(),
           Expanded(
             child: chats.when(
               // The list streams from the local database, so the loading state
@@ -89,7 +122,10 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (Object error, StackTrace stack) =>
                   _ErrorState(message: l10n.errorGeneric),
-              data: (List<ChatRow> rows) {
+              data: (List<ChatRow> allRows) {
+                // A folder is a filter over the same list rather than a
+                // different one, so it narrows the rows already on screen.
+                final List<ChatRow> rows = _inSelectedFolder(allRows);
                 if (rows.isEmpty) {
                   // With nothing cached, a failed fetch and a genuinely empty
                   // account look identical to the user unless they are told
@@ -320,4 +356,58 @@ class _ErrorState extends StatelessWidget {
   Widget build(BuildContext context) => Center(
         child: Text(message, style: Theme.of(context).textTheme.bodyMedium),
       );
+}
+
+/// The folder tab strip (§12).
+///
+/// It is a strip of filters, not of inboxes: selecting one narrows the list
+/// below, and "All" is the same list with nothing filtered out. It renders
+/// nothing at all when there are no folders.
+class _FolderTabs extends ConsumerWidget {
+  const _FolderTabs();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final List<ChatFolder> folders =
+        ref.watch(chatFoldersProvider).valueOrNull ?? const <ChatFolder>[];
+    if (folders.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final String? selected = ref.watch(selectedFolderProvider);
+    return SizedBox(
+      height: SobhSizes.minTapTarget,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: SobhSpacing.md),
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(right: SobhSpacing.sm),
+            child: ChoiceChip(
+              label: Text(l10n.foldersAll),
+              selected: selected == null,
+              onSelected: (_) =>
+                  ref.read(selectedFolderProvider.notifier).state = null,
+            ),
+          ),
+          for (final ChatFolder folder in folders)
+            Padding(
+              padding: const EdgeInsets.only(right: SobhSpacing.sm),
+              child: ChoiceChip(
+                label: Text(
+                  folder.unreadCount > 0
+                      ? '${folder.title} · ${folder.unreadCount}'
+                      : folder.title,
+                ),
+                avatar: folder.emoji.isEmpty ? null : Text(folder.emoji),
+                selected: selected == folder.id,
+                onSelected: (_) =>
+                    ref.read(selectedFolderProvider.notifier).state = folder.id,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

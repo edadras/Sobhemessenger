@@ -209,6 +209,67 @@ class AccountRepository {
         await _api.get<Map<String, dynamic>>('/notifications/unread-count');
     return (data['unread_count'] as num?)?.toInt() ?? 0;
   }
+
+  // -------------------------------------------------------- email recovery
+
+  Future<RecoveryEmail> recoveryEmail() async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/auth/recovery/email');
+    return RecoveryEmail.fromJson(data);
+  }
+
+  /// Enrols an address and sends it a code.
+  ///
+  /// It is not the recovery address yet: it becomes one when the code is
+  /// presented, and not before. An unverified address is worse than none,
+  /// because it would be a second way into the account that the owner never
+  /// confirmed.
+  Future<void> setRecoveryEmail(String email) => _api.put<dynamic>(
+        '/auth/recovery/email',
+        body: <String, dynamic>{'email': email},
+      );
+
+  Future<void> verifyRecoveryEmail(String code) => _api.post<dynamic>(
+        '/auth/recovery/email/verify',
+        body: <String, dynamic>{'code': code},
+      );
+
+  Future<void> removeRecoveryEmail() =>
+      _api.delete<dynamic>('/auth/recovery/email');
+}
+
+/// The recovery address on the account (§4).
+class RecoveryEmail {
+  const RecoveryEmail({
+    this.email = '',
+    this.verified = false,
+    this.available = false,
+    this.verifiedAt,
+  });
+
+  factory RecoveryEmail.fromJson(Map<String, dynamic> json) => RecoveryEmail(
+        email: json['email'] as String? ?? '',
+        verified: json['verified'] as bool? ?? false,
+        available: json['available'] as bool? ?? false,
+        verifiedAt: json['verified_at'] == null
+            ? null
+            : DateTime.parse(json['verified_at'] as String).toLocal(),
+      );
+
+  /// Masked by the server: the settings screen has to show which address is on
+  /// the account without handing back the whole of it.
+  final String email;
+
+  /// The only field that decides whether recovery works.
+  final bool verified;
+
+  /// Whether this deployment can send mail at all. When false the feature is
+  /// off and the screen says so rather than offering something that would be
+  /// refused.
+  final bool available;
+  final DateTime? verifiedAt;
+
+  bool get isSet => email.isNotEmpty;
 }
 
 /// One privacy rule of §55.
@@ -270,4 +331,9 @@ final FutureProvider<List<UserDevice>> deviceListProvider =
 final FutureProvider<NotificationSettings> notificationSettingsProvider =
     FutureProvider<NotificationSettings>(
   (Ref ref) => ref.watch(accountRepositoryProvider).notificationSettings(),
+);
+
+final FutureProvider<RecoveryEmail> recoveryEmailProvider =
+    FutureProvider<RecoveryEmail>(
+  (Ref ref) => ref.watch(accountRepositoryProvider).recoveryEmail(),
 );

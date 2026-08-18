@@ -3,9 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../chat/data/organise_repository.dart';
+import '../../chat/data/topics_repository.dart';
+import '../../chat/presentation/topics_screen.dart';
 import '../data/groups_repository.dart';
+import 'chat_settings_screen.dart';
 
 /// Members, invite links and join requests for one group or channel (§16).
 class ChatInfoScreen extends ConsumerWidget {
@@ -40,7 +45,39 @@ class ChatInfoScreen extends ConsumerWidget {
                 leading: const Icon(Icons.group_outlined),
                 title: Text(l10n.groupsMembers(rows.length)),
               ),
+              ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: Text(l10n.topicsTitle),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => TopicsScreen(
+                      chatId: chatId,
+                      canModerate: canAdminister,
+                    ),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_outlined),
+                title: Text(l10n.chatClearHistory),
+                onTap: () => _clearHistory(context, ref, chatId, canAdminister),
+              ),
               if (canAdminister) ...<Widget>[
+                ListTile(
+                  leading: const Icon(Icons.dynamic_feed_outlined),
+                  title: Text(l10n.topicsEnable),
+                  subtitle: Text(l10n.topicsEnableBody),
+                  onTap: () => _enableForum(context, ref, chatId),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.tune),
+                  title: Text(l10n.settingsTitle),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ChatSettingsScreen(chatId: chatId),
+                    ),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.link),
                   title: Text(l10n.groupsInviteLink),
@@ -276,5 +313,122 @@ class JoinRequestsScreen extends ConsumerWidget {
               ),
       ),
     );
+  }
+}
+
+/// Clearing a conversation's history from the info screen.
+///
+/// The default is one-sided and always permitted: what you keep in your own
+/// copy is yours to discard. Clearing for everyone is offered only to someone
+/// who could delete the messages one at a time anyway, and the server checks
+/// the same thing.
+Future<void> _clearHistory(
+  BuildContext context,
+  WidgetRef ref,
+  String chatId,
+  bool canDeleteForEveryone,
+) async {
+  final AppLocalizations l10n = AppLocalizations.of(context);
+  bool forEveryone = false;
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => StatefulBuilder(
+      builder: (BuildContext context, StateSetter setState) => AlertDialog(
+        title: Text(l10n.chatClearHistory),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(l10n.chatClearHistoryBody),
+            if (canDeleteForEveryone)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: forEveryone,
+                title: Text(l10n.chatClearForEveryone),
+                onChanged: (bool? value) =>
+                    setState(() => forEveryone = value ?? false),
+              ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(l10n.commonCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(l10n.chatClearHistory),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (confirmed != true) {
+    return;
+  }
+
+  try {
+    await ref
+        .read(organiseRepositoryProvider)
+        .clearHistory(chatId, forEveryone: forEveryone);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(l10n.chatHistoryCleared)));
+    }
+  } on ApiException catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+}
+
+/// Turning a group into a forum.
+///
+/// It is confirmed because it changes how every message in the group is
+/// addressed: the existing history is filed under General and new messages
+/// have to name a topic or land there.
+Future<void> _enableForum(
+  BuildContext context,
+  WidgetRef ref,
+  String chatId,
+) async {
+  final AppLocalizations l10n = AppLocalizations.of(context);
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(l10n.topicsEnable),
+      content: Text(l10n.topicsEnableBody),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l10n.commonCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(l10n.commonContinue),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) {
+    return;
+  }
+
+  try {
+    await ref.read(topicsRepositoryProvider).enableForum(chatId);
+    ref.invalidate(forumTopicsProvider(chatId));
+    if (context.mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => TopicsScreen(chatId: chatId, canModerate: true),
+        ),
+      );
+    }
+  } on ApiException catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 }

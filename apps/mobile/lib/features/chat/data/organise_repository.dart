@@ -150,6 +150,23 @@ class OrganiseRepository {
 
   Future<void> cancelScheduled(String chatId, String scheduledId) =>
       _api.delete<dynamic>('/chats/$chatId/scheduled/$scheduledId');
+
+  /// Empties a conversation without leaving it.
+  ///
+  /// The default is one-sided: the caller's own copy is hidden and nothing is
+  /// deleted, so the other member's history is untouched. [forEveryone] is the
+  /// destructive form, which the server allows only in a one-to-one chat or
+  /// where the caller may delete other people's messages.
+  ///
+  /// Returns the sequence number the history was cleared up to, so the local
+  /// store can drop exactly what the server has hidden.
+  Future<int> clearHistory(String chatId, {bool forEveryone = false}) async {
+    final Map<String, dynamic> data = await _api.post<Map<String, dynamic>>(
+      '/chats/$chatId/clear-history',
+      body: <String, dynamic>{'for_everyone': forEveryone},
+    );
+    return (data['cleared_upto_seq'] as num?)?.toInt() ?? 0;
+  }
 }
 
 final Provider<OrganiseRepository> organiseRepositoryProvider =

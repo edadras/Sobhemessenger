@@ -468,5 +468,98 @@
         "type": "int"
       }
     }
-  }
+  },
+  "foldersTitle": "پوشه‌ها",
+  "foldersAll": "همه",
+  "foldersManage": "مدیریت پوشه‌ها",
+  "foldersNew": "پوشهٔ جدید",
+  "foldersName": "نام پوشه",
+  "foldersEmpty": "هنوز پوشه‌ای نساخته‌اید",
+  "foldersEmptyBody": "پوشه یک صافی ذخیره‌شده روی فهرست گفتگوهاست؛ گفتگو از فهرست اصلی حذف نمی‌شود.",
+  "foldersIncludeContacts": "مخاطبان",
+  "foldersIncludeNonContacts": "غیرمخاطبان",
+  "foldersIncludeGroups": "گروه‌ها",
+  "foldersIncludeChannels": "کانال‌ها",
+  "foldersIncludeBots": "بات‌ها",
+  "foldersExcludeMuted": "بی‌صداشده‌ها را نشان نده",
+  "foldersExcludeRead": "خوانده‌شده‌ها را نشان نده",
+  "foldersExcludeArchived": "بایگانی‌شده‌ها را نشان نده",
+  "foldersDeleteConfirm": "این پوشه حذف شود؟ گفتگوها دست‌نخورده می‌مانند.",
+  "foldersChatCount": "{count} گفتگو",
+  "@foldersChatCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "chatClearHistory": "پاک‌کردن تاریخچه",
+  "chatClearHistoryBody": "تاریخچهٔ این گفتگو برای شما پاک شود؟ گفتگو باقی می‌ماند.",
+  "chatClearForEveryone": "برای همه هم پاک شود",
+  "chatHistoryCleared": "تاریخچه پاک شد",
+  "topicsTitle": "تاپیک‌ها",
+  "topicsEnable": "تبدیل به انجمن",
+  "topicsEnableBody": "پیام‌های این گروه زیر تاپیک‌ها دسته‌بندی می‌شوند و تاریخچهٔ کنونی زیر تاپیک «عمومی» می‌رود.",
+  "topicsDisable": "خروج از حالت انجمن",
+  "topicsNew": "تاپیک جدید",
+  "topicsName": "عنوان تاپیک",
+  "topicsEmpty": "هنوز تاپیکی ساخته نشده",
+  "topicsClose": "بستن تاپیک",
+  "topicsReopen": "بازکردن تاپیک",
+  "topicsClosed": "بسته",
+  "topicsGeneral": "عمومی",
+  "topicsPin": "سنجاق‌کردن تاپیک",
+  "topicsUnpin": "برداشتن سنجاق",
+  "topicsHide": "پنهان‌کردن تاپیک",
+  "topicsDeleteConfirm": "این تاپیک و پیام‌هایش حذف شوند؟",
+  "topicsMessageCount": "{count} پیام",
+  "@topicsMessageCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "commentsTitle": "نظرها",
+  "commentsEmpty": "هنوز نظری ثبت نشده",
+  "commentsHint": "نظر خود را بنویسید",
+  "commentsDisabled": "نظر دادن روی این کانال خاموش است",
+  "commentsNoGroup": "این کانال گروه گفتگو ندارد",
+  "commentsCount": "{count} نظر",
+  "@commentsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "contactRequestsTitle": "درخواست‌های مخاطب",
+  "contactRequestsIncoming": "دریافتی",
+  "contactRequestsOutgoing": "ارسالی",
+  "contactRequestsEmpty": "درخواستی در انتظار نیست",
+  "contactRequestAccept": "پذیرفتن",
+  "contactRequestReject": "رد",
+  "contactRequestCancel": "پس‌گرفتن",
+  "contactRequestSend": "درخواست مخاطب",
+  "contactRequestSent": "درخواست ارسال شد",
+  "contactRequestMessage": "یادداشت (اختیاری)",
+  "contactRequestStatusRejected": "رد شد",
+  "contactRequestStatusAccepted": "پذیرفته شد",
+  "contactRequestStatusPending": "در انتظار",
+  "recoveryEmailTitle": "ایمیل بازیابی",
+  "recoveryEmailBody": "اگر رمز دومرحله‌ای را فراموش کنید، با این نشانی می‌توانید آن را پاک کنید.",
+  "recoveryEmailUnavailable": "این سرور ایمیل نمی‌فرستد، پس بازیابی با ایمیل خاموش است.",
+  "recoveryEmailNotSet": "نشانی‌ای ثبت نشده",
+  "recoveryEmailUnverified": "تأیید نشده — تا تأیید نشود کاری نمی‌کند",
+  "recoveryEmailVerified": "تأیید شده",
+  "recoveryEmailHint": "نشانی ایمیل",
+  "recoveryEmailCodeHint": "کدی که ایمیل شد",
+  "recoveryEmailCodeSent": "کد تأیید ایمیل شد",
+  "recoveryEmailRemove": "برداشتن نشانی",
+  "channelSignatures": "امضای نویسنده روی پست‌ها",
+  "channelComments": "اجازهٔ نظر دادن",
+  "channelDiscussionGroup": "گروه گفتگو",
+  "channelDiscussionUnlink": "جداکردن گروه گفتگو",
+  "groupStickerSet": "استیکرست گروه",
+  "groupBroadcast": "فقط مدیران پیام بفرستند"
 }

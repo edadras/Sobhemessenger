@@ -12,6 +12,7 @@ import '../../secretchat/data/secret_chat_service.dart';
 import '../../secretchat/presentation/secret_chat_screen.dart';
 import '../data/address_book.dart';
 import '../data/contacts_repository.dart';
+import 'contact_requests_screen.dart';
 
 /// The address book (§54).
 class ContactsScreen extends ConsumerStatefulWidget {
@@ -68,6 +69,15 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       appBar: AppBar(
         title: Text(l10n.contactsTitle),
         actions: <Widget>[
+          IconButton(
+            tooltip: l10n.contactRequestsTitle,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ContactRequestsScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+          ),
           IconButton(
             tooltip: l10n.contactsBlocked,
             onPressed: () => Navigator.of(context).push(
