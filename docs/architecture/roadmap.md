@@ -51,6 +51,12 @@ A feature is complete only when all of the following hold:
 | 25 | Stickers and link previews | done: sets with per-user installation, OpenGraph unfurling behind the SSRF guard |
 | 26 | Location and contact messages | done: fixed points, venues, live location with server-computed expiry, contact cards |
 | 27 | Secret chats end to end (§24) | done: X3DH and the Double Ratchet on the device through a reviewed library, keys in the platform keystore, safety numbers per device; history is not persisted — see below |
+| 28 | Chat organisation — clearing history, folders | done: one-sided and destructive clearing, folders as saved filters with rules and per-chat overrides |
+| 29 | Forum topics (§14) | done: conversion files the existing history under General, per-topic reading, closing and moderation |
+| 30 | Channel comments (§15) | done: posts mirrored into a linked discussion group, comments as ordinary replies to the mirror, author signatures |
+| 31 | Contact requests (§54) | done: send, accept, reject, withdraw, with blocking and privacy giving one refusal |
+| 32 | Anti-spam scoring (§34) | done: weighted signals, a lapsing restriction narrowed to cold outreach, decay in the worker |
+| 33 | Email account recovery (§4) | done: a recovery address that does nothing until it is verified, and clears the two-step password with every session |
 
 ## Secret chats (§24)
 
@@ -94,6 +100,23 @@ Keeping history without giving that up needs an encrypted local store —
 SQLCipher under Drift, keyed from the platform keystore. That is a change to
 the whole local database rather than to this feature, and it is listed under
 what is left rather than half-implemented here.
+
+## The columns that had no code
+
+Migration 0005 cut six columns for features nobody then wrote: a channel's
+signature switch and comment switch, the link between a channel and its
+discussion group in both directions, a group's sticker set, and broadcast mode.
+`contact_requests` and `spam_scores` were whole tables in the same position,
+and `users.recovery_email` had existed since 0001 with nothing to prove an
+address written there belonged to the account holder.
+
+All of them are now wired, and migration 0016 adds what genuinely had no schema
+at all: a per-member watermark for clearing history, chat folders with their
+include and exclude lists, forum topics with per-topic read cursors, the
+correspondence between a channel post and its mirrored copy, and the challenge
+table email recovery needs.
+
+`scripts/verify/new_surfaces.py` drives all of it against a running server.
 
 ## What is left
 
