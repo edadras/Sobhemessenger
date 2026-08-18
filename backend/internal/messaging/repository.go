@@ -1100,6 +1100,31 @@ func (r *Repository) PruneEvents(ctx context.Context, olderThan time.Duration) (
 	return tag.RowsAffected(), nil
 }
 
+// PeerKnowsSender reports whether the other member of a one-to-one chat has
+// the sender in their contacts.
+//
+// It is the test a restricted account is measured against: someone who has
+// put you in their address book has invited the conversation, and messaging
+// them is not cold outreach. Saved Messages has no other member, so it
+// answers true — an account is never restricted from talking to itself.
+func (r *Repository) PeerKnowsSender(ctx context.Context, chatID, senderID uuid.UUID) (bool, error) {
+	var known bool
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT NOT EXISTS (
+		    SELECT 1
+		    FROM chat_members m
+		    WHERE m.chat_id = $1 AND m.user_id <> $2 AND m.left_at IS NULL
+		      AND NOT EXISTS (
+		          SELECT 1 FROM contacts c
+		          WHERE c.owner_id = m.user_id AND c.contact_id = $2
+		      )
+		)`, chatID, senderID).Scan(&known)
+	if err != nil {
+		return false, fmt.Errorf("messaging: check peer contact: %w", err)
+	}
+	return known, nil
+}
+
 // ChatMemberIDs lists the current members, used for realtime fan-out.
 func (r *Repository) ChatMemberIDs(ctx context.Context, chatID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := r.db.Pool.Query(ctx,

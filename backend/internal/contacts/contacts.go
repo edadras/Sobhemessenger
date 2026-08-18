@@ -314,7 +314,23 @@ type Service struct {
 	limiter *ratelimit.Limiter
 	rules   ratelimit.Rules
 	cfg     config.Auth
+	// spam is optional; see SetSpamRecorder.
+	spam SpamRecorder
 }
+
+// SpamRecorder is told when someone is blocked (§34).
+//
+// Being blocked is weak evidence on its own — people block for all sorts of
+// reasons — but it accumulates, and an account that many strangers block is
+// behaving in a way worth noticing. It is an interface so this package does
+// not depend on the anti-spam module, which reads the contacts tables.
+type SpamRecorder interface {
+	Blocked(ctx context.Context, userID uuid.UUID)
+}
+
+// SetSpamRecorder installs the recorder. Called during assembly, before the
+// server accepts a request.
+func (s *Service) SetSpamRecorder(recorder SpamRecorder) { s.spam = recorder }
 
 func NewService(repo *Repository, limiter *ratelimit.Limiter, rules ratelimit.Rules, cfg config.Auth) *Service {
 	return &Service{repo: repo, limiter: limiter, rules: rules, cfg: cfg}
@@ -483,6 +499,9 @@ func (s *Service) Block(ctx context.Context, ownerID, blockedID uuid.UUID, reaso
 			return httpx.Validation("You cannot block yourself").WithField("user_id", "cannot be yourself")
 		}
 		return httpx.Internal(err)
+	}
+	if s.spam != nil {
+		s.spam.Blocked(ctx, blockedID)
 	}
 	return nil
 }

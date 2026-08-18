@@ -290,6 +290,18 @@ func (r *Repository) CreateReport(ctx context.Context, reporterID uuid.UUID, tar
 	return id, nil
 }
 
+// MessageAuthor resolves who wrote a message, for scoring a report about it.
+// A message posted by a chat rather than a person has no author to score.
+func (r *Repository) MessageAuthor(ctx context.Context, messageID uuid.UUID) (*uuid.UUID, error) {
+	var author *uuid.UUID
+	err := r.db.Pool.QueryRow(ctx,
+		`SELECT sender_id FROM messages WHERE id = $1`, messageID).Scan(&author)
+	if err != nil {
+		return nil, fmt.Errorf("admin: read message author: %w", err)
+	}
+	return author, nil
+}
+
 func (r *Repository) ResolveReport(ctx context.Context, reportID, resolverID uuid.UUID, status, resolution string) error {
 	tag, err := r.db.Pool.Exec(ctx, `
 		UPDATE reports
@@ -496,7 +508,23 @@ type Service struct {
 	flags      *featureflags.Service
 	invalidate InvalidateUser
 	logger     *slog.Logger
+	// spam is optional; see SetSpamRecorder.
+	spam SpamRecorder
 }
+
+// SpamRecorder is told when a user is reported (§34).
+//
+// A report is the strongest ordinary signal there is — somebody took a
+// deliberate action naming this account — so it weighs far more than a block
+// or a rate-limit trip. It is an interface so this package does not depend on
+// the anti-spam module.
+type SpamRecorder interface {
+	Reported(ctx context.Context, userID uuid.UUID, reason string)
+}
+
+// SetSpamRecorder installs the recorder. Called during assembly, before the
+// server accepts a request.
+func (s *Service) SetSpamRecorder(recorder SpamRecorder) { s.spam = recorder }
 
 func NewService(repo *Repository, flags *featureflags.Service, invalidate InvalidateUser, logger *slog.Logger) *Service {
 	return &Service{repo: repo, flags: flags, invalidate: invalidate, logger: logger}
@@ -760,6 +788,21 @@ func (s *Service) CreateReport(ctx context.Context, reporterID uuid.UUID, target
 	id, err := s.repo.CreateReport(ctx, reporterID, targetType, targetID, reason, detail)
 	if err != nil {
 		return uuid.Nil, httpx.Internal(err)
+	}
+
+	if s.spam != nil {
+		// A report names content; the score belongs to whoever produced it.
+		// Only the two target types that resolve to a person are scored — a
+		// report about a chat or an article is a moderation case, not
+		// evidence against an individual.
+		switch targetType {
+		case "user":
+			s.spam.Reported(ctx, targetID, reason)
+		case "message":
+			if author, err := s.repo.MessageAuthor(ctx, targetID); err == nil && author != nil {
+				s.spam.Reported(ctx, *author, reason)
+			}
+		}
 	}
 	return id, nil
 }

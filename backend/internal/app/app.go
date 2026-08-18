@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sobh/messenger/backend/internal/admin"
+	"github.com/sobh/messenger/backend/internal/antispam"
 	"github.com/sobh/messenger/backend/internal/auth"
 	"github.com/sobh/messenger/backend/internal/bots"
 	"github.com/sobh/messenger/backend/internal/bus"
@@ -79,6 +80,7 @@ type App struct {
 	Notifications *notifications.Service
 	Search        *search.Service
 	Admin         *admin.Service
+	Antispam      *antispam.Service
 	Presence      *presence.Service
 	Flags         *featureflags.Service
 	Hub           *realtime.Hub
@@ -244,8 +246,17 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 
 	// The admin module drops cached auth state after a ban or role change; it
 	// receives the invalidator as a function so it does not depend on auth.
+	// Anti-spam scoring (§34). Every producer of a signal and the one consumer
+	// of the verdict are wired here rather than through constructors, so a
+	// module that records a signal does not have to depend on the one that
+	// weighs it.
+	antispamService := antispam.NewService(antispam.NewRepository(db))
+	messagingService.SetSpamGuard(antispamService)
+	contactsService.SetSpamRecorder(antispamService)
+
 	adminService := admin.NewService(admin.NewRepository(db), flags,
 		authMiddleware.InvalidateUserCache, logger)
+	adminService.SetSpamRecorder(antispamService)
 
 	hub := realtime.NewHub(cfg.NodeID, messageBus, metrics, logger)
 
@@ -259,6 +270,7 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 		Stories: storiesService, Polls: pollsService, Calls: callsService,
 		News: newsService, Notifications: notificationsService, Search: searchService,
 		Admin:    adminService,
+		Antispam: antispamService,
 		Presence: presenceService, Flags: flags, Hub: hub,
 	}
 
@@ -327,6 +339,7 @@ func (a *App) buildRouter(
 	notificationsHandler := notifications.NewHandler(a.Notifications)
 	searchHandler := search.NewHandler(a.Search)
 	adminHandler := admin.NewHandler(a.Admin, authMiddleware.RequirePermission)
+	antispamHandler := antispam.NewHandler(a.Antispam, authMiddleware.RequirePermission)
 	flagsHandler := featureflags.NewHandler(a.Flags)
 
 	wsHandler := realtime.NewHandler(a.Hub, authMiddleware, a.AuthRepo,
@@ -393,6 +406,7 @@ func (a *App) buildRouter(
 				operator.Use(authMiddleware.RequirePermission(admin.PermUsersRead))
 				operator.Mount("/admin", adminHandler.Routes())
 				operator.Mount("/admin/search", searchHandler.AdminRoutes())
+				operator.Mount("/admin/spam-scores", antispamHandler.Routes())
 			})
 
 			private.Group(func(editorial chi.Router) {

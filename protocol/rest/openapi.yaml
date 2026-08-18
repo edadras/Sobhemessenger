@@ -4593,6 +4593,55 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/v1/admin/spam-scores/{userID}:
+    get:
+      tags: [Admin]
+      summary: Read an account's anti-spam standing
+      description: >
+        The rolling score (§34) and whether it currently restricts the account.
+        This is not a ban: a restriction lapses on its own, and the score decays
+        without new evidence. An account with no score at all — the ordinary
+        case — reports zero rather than 404, so the panel has one shape to
+        render.
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The score, whether it is biting, and the threshold it is measured against
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          restricted: { type: boolean }
+                          threshold: { type: integer }
+                          score:
+                            type: object
+                            properties:
+                              subject_type: { type: string }
+                              subject_key: { type: string }
+                              score: { type: integer }
+                              reason: { type: string }
+                              restricted_until: { type: string, format: date-time, nullable: true }
+                              updated_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      tags: [Admin]
+      summary: Clear an account's score and any restriction with it
+      description: >
+        For a moderator who has dismissed the reports that caused it: leaving
+        the account serving a sentence for a case that was thrown out would be
+        the wrong outcome.
+      parameters:
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Cleared }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/v1/admin/search/reindex/{index}:
     post:
       tags: [Admin]

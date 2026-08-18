@@ -28,6 +28,22 @@ const (
 	MaxHistoryPageSize = 200
 )
 
+// SpamGuard answers whether an account is currently held back for behaving
+// like a spammer (§34).
+//
+// It is an interface for the same reason MessageObserver is one: the anti-spam
+// module reads the messaging tables, and a dependency back the other way would
+// be a cycle. A nil guard allows everything, so a deployment without the
+// module behaves exactly as it did before.
+type SpamGuard interface {
+	// Restricted reports whether the user may not currently start new
+	// conversations, and when that lapses.
+	Restricted(ctx context.Context, userID uuid.UUID) (bool, time.Time)
+	// RateLimited records a send the limiter refused, which is weak evidence
+	// on its own and accumulates.
+	RateLimited(ctx context.Context, userID uuid.UUID)
+}
+
 // MessageObserver is told about a message once it has been delivered.
 //
 // It exists so the bot platform can see traffic without messaging importing
@@ -51,7 +67,13 @@ type Service struct {
 	// observers is written once during assembly and only read afterwards, so
 	// it needs no lock.
 	observers []MessageObserver
+	// guard is optional; see SpamGuard.
+	guard SpamGuard
 }
+
+// SetSpamGuard installs the anti-spam check. Called during assembly, before
+// the server accepts a request.
+func (s *Service) SetSpamGuard(guard SpamGuard) { s.guard = guard }
 
 // AddObserver registers an observer. Called during assembly, before the server
 // accepts a request.
@@ -114,7 +136,14 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		s.logger.Warn("message rate limiter unavailable", slog.Any("error", err))
 	}
 	if !allowed.Allowed {
+		if s.guard != nil {
+			s.guard.RateLimited(ctx, in.SenderID)
+		}
 		return nil, httpx.RateLimited(int(allowed.RetryAfter.Seconds()))
+	}
+
+	if err := s.checkNotRestricted(ctx, chatCtx, in.SenderID); err != nil {
+		return nil, err
 	}
 
 	// Slow mode: members wait between posts; staff are exempt (§14).
@@ -171,6 +200,47 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 	s.metrics.MessagesSent.WithLabelValues(chatCtx.ChatType, in.Type).Inc()
 	s.metrics.MessageSendLatency.Observe(time.Since(start).Seconds())
 	return result.Message, nil
+}
+
+// checkNotRestricted stops a restricted account cold-messaging strangers.
+//
+// The restriction is deliberately narrow. It does not silence the account:
+// groups it is already in, and one-to-one chats with people who have it in
+// their contacts, all keep working. What it stops is the thing spam actually
+// is — approaching people who do not know you — so an account caught by a
+// false positive can still talk to everyone it already talks to while the
+// restriction lapses.
+func (s *Service) checkNotRestricted(ctx context.Context, chatCtx *ChatContext, senderID uuid.UUID) error {
+	if s.guard == nil {
+		return nil
+	}
+	if chatCtx.ChatType != ChatPrivate && chatCtx.ChatType != ChatSecret {
+		return nil
+	}
+
+	restricted, until := s.guard.Restricted(ctx, senderID)
+	if !restricted {
+		return nil
+	}
+
+	known, err := s.repo.PeerKnowsSender(ctx, chatCtx.ChatID, senderID)
+	if err != nil {
+		// The restriction is a precaution, not a sanction; a failed lookup
+		// must not turn it into a silence.
+		s.logger.Warn("could not check whether the peer knows the sender",
+			slog.String("chat_id", chatCtx.ChatID.String()), slog.Any("error", err))
+		return nil
+	}
+	if known {
+		return nil
+	}
+
+	denial := httpx.Forbidden(httpx.CodeForbidden,
+		"Your account is temporarily limited to people who have you in their contacts")
+	if wait := time.Until(until); wait > 0 {
+		denial.RetryAfter = int(wait.Seconds()) + 1
+	}
+	return denial
 }
 
 // indexForSearch queues a message for the search index (§26).

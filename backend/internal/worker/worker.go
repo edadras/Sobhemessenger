@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/sobh/messenger/backend/internal/antispam"
 	"github.com/sobh/messenger/backend/internal/bus"
 	"github.com/sobh/messenger/backend/internal/cache"
 	"github.com/sobh/messenger/backend/internal/config"
@@ -223,6 +224,7 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 		{"released_upload_parts", r.reapExpiredUploads},
 		{"stranded_media", r.retryStrandedMedia},
 		{"expired_turn_credentials", r.pruneTURNCredentials},
+		{"decayed_spam_scores", r.decaySpamScores},
 		{"scheduled_articles", r.publishScheduledArticles},
 	}
 
@@ -270,6 +272,16 @@ func (r *Runner) pruneSyncEvents(ctx context.Context) (int64, error) {
 //
 // Bounded per run so one chat with a short timer and a long history cannot
 // monopolise a maintenance tick; the next tick continues where this stopped.
+// decaySpamScores sheds anti-spam score with the passage of time (§34).
+//
+// Without it the score is a ratchet: every long-lived account eventually
+// crosses the threshold, and an account that has behaved for a month goes on
+// paying for a bad week. Elapsed time is measured from each row's own
+// updated_at, so the outcome does not depend on how often this runs.
+func (r *Runner) decaySpamScores(ctx context.Context) (int64, error) {
+	return antispam.NewRepository(r.db).Decay(ctx, antispam.DecayPerDay)
+}
+
 func (r *Runner) autoDeleteMessages(ctx context.Context) (int64, error) {
 	tag, err := r.db.Pool.Exec(ctx, `
 		UPDATE messages m
