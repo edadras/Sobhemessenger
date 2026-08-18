@@ -429,7 +429,7 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			return fmt.Errorf("messaging: marshal event: %w", err)
 		}
 
-		recipients, seqs, err := appendUserEvents(ctx, tx, p.ChatID, p.SenderID, EventMessageNew, payload)
+		recipients, seqs, err := appendUserEvents(ctx, tx, p.ChatID, EventMessageNew, payload)
 		if err != nil {
 			return err
 		}
@@ -457,12 +457,29 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 // The counters are locked in user_id order first: two chats that share members
 // would otherwise be able to grab the same rows in opposite orders and
 // deadlock.
-func appendUserEvents(ctx context.Context, tx pgx.Tx, chatID, excludeUserID uuid.UUID, eventType string, payload []byte) ([]uuid.UUID, map[uuid.UUID]int64, error) {
+// appendUserEvents writes one event to every member's log, the actor included.
+//
+// Including the person who caused the event is the point. The log is per user,
+// not per device, and it is the only thing a second device reads to catch up
+// (§9) — so excluding the actor meant their tablet never learned what their
+// phone had just sent, edited or deleted. It would find the message only by
+// refetching the whole conversation, and the chat list would go on showing a
+// stale last message until it did.
+//
+// The device that caused the event receives its own echo. That costs one frame
+// and is harmless: every client already reconciles on `client_message_id` and
+// upserts by message id, because a retried send has always been able to arrive
+// twice.
+//
+// This is deliberately not the same question as the unread counter, which does
+// still skip the actor — a message you sent is not unread for you. That
+// exclusion lives in its own statement.
+func appendUserEvents(ctx context.Context, tx pgx.Tx, chatID uuid.UUID, eventType string, payload []byte) ([]uuid.UUID, map[uuid.UUID]int64, error) {
 	rows, err := tx.Query(ctx, `
 		WITH recipients AS (
 			SELECT m.user_id
 			FROM chat_members m
-			WHERE m.chat_id = $1 AND m.user_id <> $2 AND m.left_at IS NULL
+			WHERE m.chat_id = $1 AND m.left_at IS NULL
 			ORDER BY m.user_id
 		),
 		locked AS (
@@ -479,9 +496,9 @@ func appendUserEvents(ctx context.Context, tx pgx.Tx, chatID, excludeUserID uuid
 			RETURNING c.user_id, c.last_seq
 		)
 		INSERT INTO user_events (user_id, seq, type, payload)
-		SELECT user_id, last_seq, $3, $4::jsonb FROM bumped
+		SELECT user_id, last_seq, $2, $3::jsonb FROM bumped
 		RETURNING user_id, seq`,
-		chatID, excludeUserID, eventType, payload)
+		chatID, eventType, payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("messaging: append user events: %w", err)
 	}
@@ -657,7 +674,7 @@ func (r *Repository) Edit(ctx context.Context, messageID, editorID uuid.UUID, co
 		if err != nil {
 			return err
 		}
-		recipients, _, err = appendUserEvents(ctx, tx, chatID, editorID, EventMessageEdited, payload)
+		recipients, _, err = appendUserEvents(ctx, tx, chatID, EventMessageEdited, payload)
 		return err
 	})
 	if err != nil {
@@ -696,7 +713,7 @@ func (r *Repository) Delete(ctx context.Context, messageID, actorID uuid.UUID) (
 		if err != nil {
 			return err
 		}
-		recipients, _, err = appendUserEvents(ctx, tx, chatID, actorID, EventMessageDeleted, payload)
+		recipients, _, err = appendUserEvents(ctx, tx, chatID, EventMessageDeleted, payload)
 		return err
 	})
 	return chatID, seq, recipients, err

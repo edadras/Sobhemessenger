@@ -3,6 +3,7 @@ package messaging_test
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -284,11 +285,20 @@ func TestSendWritesRecipientSyncEvents(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 
-	if len(result.Recipients) != 1 || result.Recipients[0] != bob {
-		t.Fatalf("recipients = %v, want [%s]", result.Recipients, bob)
+	// Both members get an event, the sender included. The log is per user and
+	// it is what a second device reads to catch up (§9), so leaving the sender
+	// out would mean their tablet never learned what their phone had sent.
+	if len(result.Recipients) != 2 {
+		t.Fatalf("recipients = %v, want both members", result.Recipients)
+	}
+	found := map[uuid.UUID]bool{}
+	for _, recipient := range result.Recipients {
+		found[recipient] = true
+	}
+	if !found[alice] || !found[bob] {
+		t.Fatalf("recipients = %v, want both %s and %s", result.Recipients, alice, bob)
 	}
 
-	// Bob sees the event; Alice does not get one for her own message.
 	events, latest, err := repo.EventsSince(ctx, bob, 0, 10)
 	if err != nil {
 		t.Fatalf("EventsSince(bob): %v", err)
@@ -303,12 +313,16 @@ func TestSendWritesRecipientSyncEvents(t *testing.T) {
 		t.Errorf("server head = %d, want %d", latest, events[0].Seq)
 	}
 
+	// The sender gets one too. This used to assert zero, which is what made a
+	// second device blind to anything sent from the first — it would find the
+	// message only by refetching the whole conversation.
 	aliceEvents, _, err := repo.EventsSince(ctx, alice, 0, 10)
 	if err != nil {
 		t.Fatalf("EventsSince(alice): %v", err)
 	}
-	if len(aliceEvents) != 0 {
-		t.Errorf("sender received %d events for their own message, want 0", len(aliceEvents))
+	if len(aliceEvents) != 1 {
+		t.Errorf("sender received %d events for their own message, want 1 for their other devices",
+			len(aliceEvents))
 	}
 }
 
@@ -436,8 +450,10 @@ func TestDeleteLeavesATombstone(t *testing.T) {
 	if seq != sent.Message.Seq {
 		t.Errorf("deleted seq = %d, want %d", seq, sent.Message.Seq)
 	}
-	if len(recipients) != 1 {
-		t.Errorf("delete notified %d recipients, want 1", len(recipients))
+	// Both members, the deleter included: their other devices have to remove it
+	// from the conversation too.
+	if len(recipients) != 2 {
+		t.Errorf("delete notified %d recipients, want both members", len(recipients))
 	}
 
 	// The row survives so the sequence stays contiguous, but the body is gone.
@@ -592,5 +608,134 @@ func TestGroupChatsHaveNoPeer(t *testing.T) {
 		if chat.ID == groupID && chat.Peer != nil {
 			t.Errorf("the group came back with a peer: %+v", chat.Peer)
 		}
+	}
+}
+
+func TestTheSenderGetsTheirOwnEventForOtherDevices(t *testing.T) {
+	// The sync log is per user, not per device, and it is the only thing a
+	// second device reads to catch up (§9). Leaving the sender out meant their
+	// tablet never learned what their phone had just sent: it would find the
+	// message only by refetching the whole conversation, and the chat list
+	// would go on showing a stale last message until it did.
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID, _, err := repo.EnsurePrivateChat(ctx, alice, bob)
+	if err != nil {
+		t.Fatalf("EnsurePrivateChat: %v", err)
+	}
+
+	result, err := repo.Send(ctx, messaging.SendParams{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "from my phone",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	for _, party := range []struct {
+		name string
+		id   uuid.UUID
+	}{{"the sender", alice}, {"the recipient", bob}} {
+		events, _, err := repo.EventsSince(ctx, party.id, 0, 100)
+		if err != nil {
+			t.Fatalf("EventsSince for %s: %v", party.name, err)
+		}
+		found := false
+		for _, event := range events {
+			if event.Type == messaging.EventMessageNew &&
+				strings.Contains(string(event.Payload), result.Message.ID.String()) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s has no event for the message; %d events in the log", party.name, len(events))
+		}
+	}
+}
+
+func TestSendingDoesNotMakeAMessageUnreadForItsSender(t *testing.T) {
+	// The sender now receives an event, which must not be mistaken for the
+	// unread counter also counting it. Those are separate statements and only
+	// one of them should skip the sender.
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID, _, _ := repo.EnsurePrivateChat(ctx, alice, bob)
+
+	if _, err := repo.Send(ctx, messaging.SendParams{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "hello",
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	unread := func(user uuid.UUID) int {
+		var count int
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT unread_count FROM chat_members WHERE chat_id = $1 AND user_id = $2`,
+			chatID, user).Scan(&count); err != nil {
+			t.Fatalf("read unread count: %v", err)
+		}
+		return count
+	}
+
+	if got := unread(alice); got != 0 {
+		t.Errorf("the sender's unread count is %d, want 0", got)
+	}
+	if got := unread(bob); got != 1 {
+		t.Errorf("the recipient's unread count is %d, want 1", got)
+	}
+}
+
+func TestEditingAndDeletingReachTheActorsOwnDevices(t *testing.T) {
+	db := testDB(t)
+	repo := messaging.NewRepository(db)
+	ctx := context.Background()
+
+	alice := createUser(t, db, "alice")
+	bob := createUser(t, db, "bob")
+	chatID, _, _ := repo.EnsurePrivateChat(ctx, alice, bob)
+
+	result, err := repo.Send(ctx, messaging.SendParams{
+		ChatID: chatID, SenderID: alice, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "before",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	countFor := func(user uuid.UUID, eventType string) int {
+		events, _, err := repo.EventsSince(ctx, user, 0, 200)
+		if err != nil {
+			t.Fatalf("EventsSince: %v", err)
+		}
+		n := 0
+		for _, event := range events {
+			if event.Type == eventType {
+				n++
+			}
+		}
+		return n
+	}
+
+	if _, _, err := repo.Edit(ctx, result.Message.ID, alice, "after", nil); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if countFor(alice, messaging.EventMessageEdited) == 0 {
+		t.Error("the editor's own devices were told nothing about the edit")
+	}
+
+	if _, _, _, err := repo.Delete(ctx, result.Message.ID, alice); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if countFor(alice, messaging.EventMessageDeleted) == 0 {
+		t.Error("the deleter's own devices were told nothing about the deletion")
 	}
 }
