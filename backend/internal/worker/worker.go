@@ -10,11 +10,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/sobh/messenger/backend/internal/antispam"
 	"github.com/sobh/messenger/backend/internal/bus"
 	"github.com/sobh/messenger/backend/internal/cache"
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/database"
+	"github.com/sobh/messenger/backend/internal/datarights"
 	"github.com/sobh/messenger/backend/internal/media"
 	"github.com/sobh/messenger/backend/internal/messaging"
 	"github.com/sobh/messenger/backend/internal/notifications"
@@ -226,6 +229,7 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 		{"stranded_media", r.retryStrandedMedia},
 		{"expired_turn_credentials", r.pruneTURNCredentials},
 		{"decayed_spam_scores", r.decaySpamScores},
+		{"data_requests", r.carryOutDataRequests},
 		{"scheduled_articles", r.publishScheduledArticles},
 	}
 
@@ -285,6 +289,68 @@ func (r *Runner) pruneSyncEvents(ctx context.Context) (int64, error) {
 //
 // Bounded per run so one chat with a short timer and a long history cannot
 // monopolise a maintenance tick; the next tick continues where this stopped.
+// dataRequestBatch bounds one pass. An export is heavy — a dozen queries and
+// an upload — so a backlog is drained steadily rather than all at once.
+const dataRequestBatch = 20
+
+// carryOutDataRequests performs the exports and deletions whose time has come
+// (§56).
+//
+// A deletion's time is the end of its cancellation window; an export's is
+// immediately. Both are claimed with FOR UPDATE SKIP LOCKED, so running
+// several workers does not carry the same request out twice.
+//
+// A failure returns the request to pending with the reason recorded rather
+// than abandoning it: an export that failed because the object store was
+// briefly unreachable is worth retrying, and a person who asked for their data
+// should not have to ask again because of it.
+func (r *Runner) carryOutDataRequests(ctx context.Context) (int64, error) {
+	if r.storage == nil {
+		// Without object storage there is nowhere to put an export. Deletions
+		// would still work, but a worker that silently did half the job is
+		// worse than one that says it cannot.
+		return 0, nil
+	}
+
+	repo := datarights.NewRepository(r.db)
+	due, err := repo.ClaimDue(ctx, dataRequestBatch)
+	if err != nil {
+		return 0, err
+	}
+
+	var done int64
+	for _, request := range due {
+		var runErr error
+		switch request.Type {
+		case datarights.TypeExport:
+			var mediaID uuid.UUID
+			mediaID, runErr = repo.Export(ctx, r.storage, request.UserID)
+			if runErr == nil {
+				runErr = repo.MarkReady(ctx, request.ID, mediaID)
+			}
+		case datarights.TypeDelete:
+			runErr = repo.Delete(ctx, request.UserID)
+			if runErr == nil {
+				runErr = repo.MarkCompleted(ctx, request.ID)
+			}
+		}
+
+		if runErr != nil {
+			r.logger.Error("could not carry out a data request",
+				slog.String("request_id", request.ID.String()),
+				slog.String("type", request.Type),
+				slog.Any("error", runErr))
+			if markErr := repo.MarkFailed(ctx, request.ID, runErr.Error()); markErr != nil {
+				r.logger.Error("could not record a data-request failure",
+					slog.String("request_id", request.ID.String()), slog.Any("error", markErr))
+			}
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+
 // decaySpamScores sheds anti-spam score with the passage of time (§34).
 //
 // Without it the score is a ratchet: every long-lived account eventually

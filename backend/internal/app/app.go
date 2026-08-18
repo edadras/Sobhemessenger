@@ -31,6 +31,7 @@ import (
 	"github.com/sobh/messenger/backend/internal/config"
 	"github.com/sobh/messenger/backend/internal/contacts"
 	"github.com/sobh/messenger/backend/internal/database"
+	"github.com/sobh/messenger/backend/internal/datarights"
 	"github.com/sobh/messenger/backend/internal/featureflags"
 	"github.com/sobh/messenger/backend/internal/groups"
 	"github.com/sobh/messenger/backend/internal/httpx"
@@ -81,6 +82,7 @@ type App struct {
 	Search        *search.Service
 	Admin         *admin.Service
 	Antispam      *antispam.Service
+	DataRights    *datarights.Service
 	Presence      *presence.Service
 	Flags         *featureflags.Service
 	Hub           *realtime.Hub
@@ -260,6 +262,8 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	messagingService.SetSpamGuard(antispamService)
 	contactsService.SetSpamRecorder(antispamService)
 
+	dataRightsService := datarights.NewService(datarights.NewRepository(db))
+
 	adminService := admin.NewService(admin.NewRepository(db), flags,
 		authMiddleware.InvalidateUserCache, logger)
 	adminService.SetSpamRecorder(antispamService)
@@ -275,9 +279,10 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 		Media: mediaService, Groups: groupsService, Communities: communitiesService,
 		Stories: storiesService, Polls: pollsService, Calls: callsService,
 		News: newsService, Notifications: notificationsService, Search: searchService,
-		Admin:    adminService,
-		Antispam: antispamService,
-		Presence: presenceService, Flags: flags, Hub: hub,
+		Admin:      adminService,
+		Antispam:   antispamService,
+		DataRights: dataRightsService,
+		Presence:   presenceService, Flags: flags, Hub: hub,
 	}
 
 	router := app.buildRouter(authMiddleware, authService, messagingService, presenceService)
@@ -345,6 +350,7 @@ func (a *App) buildRouter(
 	notificationsHandler := notifications.NewHandler(a.Notifications)
 	searchHandler := search.NewHandler(a.Search)
 	adminHandler := admin.NewHandler(a.Admin, authMiddleware.RequirePermission)
+	dataRightsHandler := datarights.NewHandler(a.DataRights)
 	antispamHandler := antispam.NewHandler(a.Antispam, authMiddleware.RequirePermission)
 	flagsHandler := featureflags.NewHandler(a.Flags)
 
@@ -375,6 +381,7 @@ func (a *App) buildRouter(
 			private.Use(authMiddleware.RequireAuth)
 
 			private.Mount("/users", usersHandler.Routes())
+			private.Mount("/me/data-requests", dataRightsHandler.Routes())
 			private.Mount("/bots", botsHandler.ManagementRoutes())
 			private.Mount("/stickers", stickersHandler.Routes())
 			// What a person's client calls to use a bot inline or tap a button,

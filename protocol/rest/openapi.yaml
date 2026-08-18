@@ -1377,6 +1377,67 @@ paths:
         "404": { description: No such request, or not yours to cancel }
         "409": { description: Already resolved }
 
+  /api/v1/me/data-requests:
+    get:
+      tags: [Users]
+      summary: The caller's export and deletion requests
+      responses:
+        "200":
+          description: The requests, newest first, and how long a deletion waits
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          deletion_delay_seconds: { type: integer }
+                          requests:
+                            type: array
+                            items: { $ref: "#/components/schemas/DataRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Users]
+      summary: Ask for a copy of your data, or for the account to be deleted
+      description: >
+        An export starts at once — there is nothing to reconsider about a copy
+        of your own data — and produces a JSON document in the export bucket,
+        recorded as media so it downloads through the ordinary presigned path.
+        A deletion waits seven days first: somebody who deletes in anger, or
+        whose account is deleted by an intruder holding a session, has that
+        long to take it back. The account stays usable during the window,
+        because revoking sessions immediately would remove the only means of
+        cancelling.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [export, delete] }
+      responses:
+        "201":
+          description: The request
+        "409": { description: A request of that kind is already in progress }
+
+  /api/v1/me/data-requests/{requestID}:
+    delete:
+      tags: [Users]
+      summary: Withdraw a request
+      description: >
+        Only while it is still pending or in progress. A request that is not
+        yours and one that is past cancelling answer the same way, so guessing
+        ids reveals nothing.
+      parameters:
+        - { name: requestID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Withdrawn }
+        "404": { description: Nothing of yours is waiting to be carried out }
+
   /api/v1/secret/chats:
     post:
       tags: [Secret chats]
@@ -6153,6 +6214,28 @@ components:
         exclude_muted: { type: boolean }
         exclude_read: { type: boolean }
         exclude_archived: { type: boolean, default: true }
+
+    DataRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        type: { type: string, enum: [export, delete] }
+        status:
+          type: string
+          enum: [pending, processing, ready, failed, cancelled, completed]
+        result_media_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The export archive, once there is one.
+        execute_after:
+          type: string
+          format: date-time
+          description: When a deletion becomes irreversible. Until then it can be withdrawn.
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
 
     ContactRequest:
       type: object
