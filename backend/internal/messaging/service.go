@@ -26,6 +26,14 @@ const (
 	MaxMentions        = 50
 	EditWindow         = 48 * time.Hour
 	MaxHistoryPageSize = 200
+	// MaxReadReceiptWrites bounds how many per-message receipts one read
+	// records. Somebody returning to a chat with thousands of unread messages
+	// would otherwise write a row per message per member, and the question
+	// receipts answer is about recent messages; older ones fall back to the
+	// cursor, which is exact and always there.
+	MaxReadReceiptWrites = 200
+	// MaxReadReceipts bounds how many are listed for one message.
+	MaxReadReceipts = 100
 )
 
 // SpamGuard answers whether an account is currently held back for behaving
@@ -668,12 +676,22 @@ func (s *Service) Delete(ctx context.Context, messageID, actorID uuid.UUID) erro
 
 // MarkRead advances the read cursor and tells the other party (§7).
 func (s *Service) MarkRead(ctx context.Context, chatID, userID uuid.UUID, uptoSeq int64) (int64, error) {
-	newSeq, err := s.repo.MarkRead(ctx, chatID, userID, uptoSeq)
+	newSeq, previousSeq, err := s.repo.MarkRead(ctx, chatID, userID, uptoSeq)
 	if err != nil {
 		if errors.Is(err, ErrNotMember) {
 			return 0, httpx.Forbidden(httpx.CodeNotChatMember, "You are not a member of this chat")
 		}
 		return 0, httpx.Internal(err)
+	}
+
+	// Per-message receipts are recorded for the messages this call passed.
+	// The cursor already says how far someone has read; this is what answers
+	// "who has read *this*", which is the question a sender asks in a group.
+	// It is not worth failing the read for: the cursor moved either way, and
+	// the receipt list is an enrichment.
+	if err := s.repo.RecordReads(ctx, chatID, userID, previousSeq, newSeq, MaxReadReceiptWrites); err != nil {
+		s.logger.Warn("could not record read receipts",
+			slog.String("chat_id", chatID.String()), slog.Any("error", err))
 	}
 
 	// Read receipts are a live signal, not history: they go out over the chat
@@ -682,6 +700,39 @@ func (s *Service) MarkRead(ctx context.Context, chatID, userID uuid.UUID, uptoSe
 		"chat_id": chatID, "user_id": userID, "last_read_seq": newSeq,
 	})
 	return newSeq, nil
+}
+
+// ReadReceipts lists who has read a message.
+//
+// Only for a member of the chat, and only for a message in it: a receipt list
+// names people, and an id from another conversation must not be a way to
+// enumerate them.
+func (s *Service) ReadReceipts(ctx context.Context, messageID, viewerID uuid.UUID, limit int) ([]ReadReceipt, error) {
+	if limit <= 0 || limit > MaxReadReceipts {
+		limit = MaxReadReceipts
+	}
+
+	message, err := s.repo.MessageByID(ctx, messageID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, httpx.NotFound(httpx.CodeMessageNotFound, "Message not found")
+		}
+		return nil, httpx.Internal(err)
+	}
+
+	chatCtx, err := s.repo.ChatContextFor(ctx, message.ChatID, viewerID)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	if !chatCtx.IsMember {
+		return nil, httpx.NotFound(httpx.CodeMessageNotFound, "Message not found")
+	}
+
+	receipts, err := s.repo.ReadReceipts(ctx, messageID, limit)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return receipts, nil
 }
 
 // React toggles an emoji reaction.

@@ -987,6 +987,44 @@ paths:
                   for_everyone: { type: boolean }
         "403": { description: Not a member, or not allowed to clear for everyone }
 
+  /api/v1/messages/{messageID}/reads:
+    get:
+      tags: [Messages]
+      summary: Who has read this message
+      description: >
+        The read cursor says how far each member has read, which is what a chat
+        list needs; this says who has read one particular message, which is what
+        a sender looks for in a group. Recorded for the most recent messages a
+        read passes — somebody returning to thousands of unread messages would
+        otherwise write a row per message per member, and older messages fall
+        back to the cursor, which is exact and always there.
+      parameters:
+        - { name: messageID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 100 } }
+      responses:
+        "200":
+          description: The readers, in the order they read it
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          count: { type: integer }
+                          reads:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                user_id: { type: string, format: uuid }
+                                display_name: { type: string }
+                                avatar_media_id: { type: string, format: uuid, nullable: true }
+                                read_at: { type: string, format: date-time }
+        "404": { description: No such message, or not in a chat you are in }
+
   /api/v1/messages/{messageID}:
     patch:
       tags: [Messages]
@@ -3508,6 +3546,106 @@ paths:
         "403": { description: Comments are switched off, or posting is not permitted }
         "404": { description: No discussion group, or no such post }
 
+  /api/v1/chats/{chatID}/roles:
+    get:
+      tags: [Groups and channels]
+      summary: The chat's named permission bundles
+      description: >
+        A role is defined once and handed to people, rather than ticking the
+        same boxes for each of them. It changes what a member may do, not where
+        they sit: who may remove or promote whom is still decided by the
+        built-in role, because that hierarchy is what stops an administrator
+        being demoted by someone they administer.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "200":
+          description: The roles, with how many people hold each
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          roles:
+                            type: array
+                            items: { $ref: "#/components/schemas/GroupRole" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Groups and channels]
+      summary: Define a role
+      description: >
+        Nobody may define a bundle carrying a permission they do not hold
+        themselves — defining a role is granting it, just to more people at
+        once.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupRoleInput" }
+      responses:
+        "201": { description: The new role }
+        "403": { description: You cannot grant a permission you do not hold }
+        "409": { description: That name is taken, or the role limit is reached }
+
+  /api/v1/chats/{chatID}/roles/{roleID}:
+    put:
+      tags: [Groups and channels]
+      summary: Rewrite a role
+      description: Everyone holding it is affected at once, which is the reason to have named roles.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: roleID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupRoleInput" }
+      responses:
+        "200": { description: The updated role }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Groups and channels]
+      summary: Delete a role
+      description: >
+        The people who held it stay in the chat and fall back to their built-in
+        role — losing a grant rather than a membership.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: roleID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Deleted }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/{chatID}/members/{userID}/role-bundle:
+    put:
+      tags: [Groups and channels]
+      summary: Give a member a named role, or take it away
+      description: >
+        A null `role_id` removes the bundle. A role belonging to another chat is
+        ignored rather than applied, so an id from elsewhere cannot grant that
+        chat's permissions here.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: userID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "200": { description: Set }
+        "403": { description: You cannot change the role of someone at or above your standing }
+        "404": { description: That user is not a member }
+
   /api/v1/chats/{chatID}/statistics:
     get:
       tags: [Groups and channels]
@@ -4151,6 +4289,45 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
+  /api/v1/calls/{callID}/sessions:
+    get:
+      tags: [Calls]
+      summary: What each side of the call negotiated
+      description: >
+        For diagnosis. The relay is stateless by design, so without this a call
+        that never connected is indistinguishable from one that was never
+        attempted. The SDP and the ICE candidates themselves are not returned —
+        they are recorded, not published, because handing them back would expose
+        the network topology of everyone in the call.
+      parameters:
+        - { name: callID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: One entry per participant
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          sessions:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                user_id: { type: string, format: uuid }
+                                device_id: { type: string, format: uuid, nullable: true }
+                                ws_node: { type: string }
+                                has_offer: { type: boolean }
+                                has_answer: { type: boolean }
+                                candidate_count: { type: integer }
+                                created_at: { type: string, format: date-time }
+                                closed_at: { type: string, format: date-time, nullable: true }
+        "403": { description: You are not in this call }
+
   /api/v1/calls/{callID}/media:
     put:
       tags: [Calls]
@@ -4522,6 +4699,113 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
+
+  /api/v1/editorial/articles/{articleID}/gallery:
+    get:
+      tags: [News]
+      summary: An article's image gallery
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: The images, in order }
+    put:
+      tags: [News]
+      summary: Replace the gallery
+      description: >
+        The whole sequence is sent. A gallery is an order, and moving one image
+        is a change to the order rather than to that image — sending the
+        sequence you want cannot leave two images claiming the same position.
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [media_id]
+                    properties:
+                      media_id: { type: string, format: uuid }
+                      caption: { type: string }
+      responses:
+        "200": { description: Replaced }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/editorial/articles/{articleID}/translations:
+    get:
+      tags: [News]
+      summary: What the article has been translated into
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The translations, by locale
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          translations:
+                            type: array
+                            items: { $ref: "#/components/schemas/ArticleTranslation" }
+
+  /api/v1/editorial/articles/{articleID}/translations/{locale}:
+    put:
+      tags: [News]
+      summary: Write one language
+      description: >
+        `source` records whether a person wrote it or a machine did. A human
+        translation is approved by whoever saved it; a machine one stays
+        unapproved until somebody reads it, because a reader is entitled to know
+        which they are looking at.
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: locale, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                subtitle: { type: string }
+                body: { type: string }
+                source: { type: string, enum: [human, ai], default: human }
+      responses:
+        "200": { description: Saved }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [News]
+      summary: Remove one language
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: locale, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/editorial/articles/{articleID}/translations/{locale}/approve:
+    post:
+      tags: [News]
+      summary: Record that a person has read a machine translation
+      parameters:
+        - { name: articleID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: locale, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Approved }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/editorial/authors:
     get:
@@ -6167,6 +6451,48 @@ components:
         message_count: { type: integer }
         unread_count: { type: integer, description: The caller's own, from their per-topic cursor. }
         last_message_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+
+    GroupRole:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        name: { type: string }
+        permissions:
+          type: object
+          additionalProperties: { type: boolean }
+        rank:
+          type: integer
+          description: >
+            Orders roles for display. Deliberately not part of who may act on
+            whom — that stays with the built-in role.
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    GroupRoleInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 64 }
+        permissions:
+          type: object
+          additionalProperties: { type: boolean }
+        rank: { type: integer, minimum: 0, maximum: 1000 }
+
+    ArticleTranslation:
+      type: object
+      properties:
+        locale: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        body: { type: string }
+        source: { type: string, enum: [human, ai] }
+        approved_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null on a machine translation nobody has read yet.
         created_at: { type: string, format: date-time }
 
     ChatFolder:

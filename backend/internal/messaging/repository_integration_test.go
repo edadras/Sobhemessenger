@@ -365,7 +365,7 @@ func TestUnreadCountsAndReadCursor(t *testing.T) {
 		t.Errorf("alice's unread count = %d, want 0", senderUnread)
 	}
 
-	if _, err := repo.MarkRead(ctx, chatID, bob, 3); err != nil {
+	if _, _, err := repo.MarkRead(ctx, chatID, bob, 3); err != nil {
 		t.Fatalf("MarkRead: %v", err)
 	}
 	if err := db.Pool.QueryRow(ctx,
@@ -378,7 +378,7 @@ func TestUnreadCountsAndReadCursor(t *testing.T) {
 	}
 
 	// The cursor must never move backwards.
-	if _, err := repo.MarkRead(ctx, chatID, bob, 1); err != nil {
+	if _, _, err := repo.MarkRead(ctx, chatID, bob, 1); err != nil {
 		t.Fatalf("MarkRead (backwards): %v", err)
 	}
 	var lastRead int64

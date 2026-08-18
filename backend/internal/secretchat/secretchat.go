@@ -98,6 +98,12 @@ type Envelope struct {
 	RecipientDeviceID uuid.UUID `json:"recipient_device_id"`
 	Ciphertext        string    `json:"ciphertext"`
 	MessageType       int       `json:"message_type"`
+	// EncryptionVersion records which construction produced the ciphertext.
+	// message_type is Signal's own type — a ratchet message or a prekey
+	// message — and says nothing about that. If the construction ever
+	// changes, bytes already in flight have to stay identifiable as belonging
+	// to the old one rather than being guessed at.
+	EncryptionVersion int       `json:"encryption_version"`
 	ClientMessageID   uuid.UUID `json:"client_message_id"`
 	CreatedAt         time.Time `json:"created_at"`
 }
@@ -415,24 +421,42 @@ func (r *Repository) StoreEnvelope(ctx context.Context, envelope Envelope, ciphe
 	err := r.db.Pool.QueryRow(ctx, `
 		INSERT INTO secret_messages (
 			chat_id, sender_device_id, recipient_device_id,
-			ciphertext, message_type, client_message_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			ciphertext, message_type, encryption_version, client_message_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (recipient_device_id, sender_device_id, client_message_id)
-		DO UPDATE SET ciphertext = EXCLUDED.ciphertext
+		DO UPDATE SET ciphertext = EXCLUDED.ciphertext,
+		              encryption_version = EXCLUDED.encryption_version
 		RETURNING id`,
 		envelope.ChatID, envelope.SenderDeviceID, envelope.RecipientDeviceID,
-		ciphertext, envelope.MessageType, envelope.ClientMessageID).Scan(&id)
+		ciphertext, envelope.MessageType, encryptionVersion(envelope.EncryptionVersion),
+		envelope.ClientMessageID).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("secretchat: store envelope: %w", err)
 	}
 	return id, nil
 }
 
+// CurrentEncryptionVersion is the construction the devices use today: X3DH and
+// the Double Ratchet as described in §24.
+const CurrentEncryptionVersion = 1
+
+// encryptionVersion defaults a client that does not send one.
+//
+// Every client in existence produces version 1, so an absent field means
+// version 1 rather than an error. Recording it as 0 would be worse than not
+// recording it at all: a row that claims a construction that never existed.
+func encryptionVersion(sent int) int {
+	if sent <= 0 {
+		return CurrentEncryptionVersion
+	}
+	return sent
+}
+
 // PendingEnvelopes returns the undelivered ciphertext for a device.
 func (r *Repository) PendingEnvelopes(ctx context.Context, deviceID uuid.UUID, limit int) ([]Envelope, error) {
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT id, chat_id, sender_device_id, recipient_device_id,
-		       ciphertext, message_type, client_message_id, created_at
+		       ciphertext, message_type, encryption_version, client_message_id, created_at
 		FROM secret_messages
 		WHERE recipient_device_id = $1 AND delivered_at IS NULL
 		ORDER BY created_at
@@ -448,7 +472,8 @@ func (r *Repository) PendingEnvelopes(ctx context.Context, deviceID uuid.UUID, l
 		var ciphertext []byte
 		if err := rows.Scan(&envelope.ID, &envelope.ChatID, &envelope.SenderDeviceID,
 			&envelope.RecipientDeviceID, &ciphertext, &envelope.MessageType,
-			&envelope.ClientMessageID, &envelope.CreatedAt); err != nil {
+			&envelope.EncryptionVersion, &envelope.ClientMessageID,
+			&envelope.CreatedAt); err != nil {
 			return nil, err
 		}
 		envelope.Ciphertext = base64.StdEncoding.EncodeToString(ciphertext)
@@ -635,6 +660,7 @@ type SendInput struct {
 	RecipientDeviceID uuid.UUID
 	Ciphertext        string
 	MessageType       int
+	EncryptionVersion int
 	ClientMessageID   uuid.UUID
 }
 
@@ -679,6 +705,7 @@ func (s *Service) Send(ctx context.Context, in SendInput) (uuid.UUID, error) {
 		SenderDeviceID:    in.SenderDeviceID,
 		RecipientDeviceID: in.RecipientDeviceID,
 		MessageType:       in.MessageType,
+		EncryptionVersion: in.EncryptionVersion,
 		ClientMessageID:   in.ClientMessageID,
 	}, ciphertext)
 	if err != nil {
@@ -986,6 +1013,7 @@ func (h *Handler) send(w http.ResponseWriter, r *http.Request) {
 		RecipientDeviceID uuid.UUID `json:"recipient_device_id"`
 		Ciphertext        string    `json:"ciphertext"`
 		MessageType       int       `json:"message_type"`
+		EncryptionVersion int       `json:"encryption_version,omitempty"`
 		ClientMessageID   uuid.UUID `json:"client_message_id"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
@@ -1000,6 +1028,7 @@ func (h *Handler) send(w http.ResponseWriter, r *http.Request) {
 		RecipientDeviceID: body.RecipientDeviceID,
 		Ciphertext:        body.Ciphertext,
 		MessageType:       body.MessageType,
+		EncryptionVersion: body.EncryptionVersion,
 		ClientMessageID:   body.ClientMessageID,
 	})
 	if err != nil {

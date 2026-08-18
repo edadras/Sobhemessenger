@@ -62,6 +62,7 @@ func (h *Handler) RegisterMessageRoutes(r chi.Router) {
 	r.Patch("/{messageID}", h.edit)
 	r.Delete("/{messageID}", h.delete)
 	r.Post("/{messageID}/reactions", h.react)
+	r.Get("/{messageID}/reads", h.readReceipts)
 }
 
 func (h *Handler) SyncRoutes() http.Handler {
@@ -861,4 +862,28 @@ func (h *Handler) topicFrom(r *http.Request) (*httpx.Principal, uuid.UUID, uuid.
 		return nil, uuid.Nil, uuid.Nil, err
 	}
 	return principal, chatID, topicID, nil
+}
+
+// readReceipts answers "who has read this", which the cursor cannot.
+func (h *Handler) readReceipts(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, err := pathUUID(r, "messageID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	receipts, err := h.service.ReadReceipts(r.Context(), messageID, principal.UserID,
+		queryInt(r, "limit", MaxReadReceipts))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"reads": receipts, "count": len(receipts),
+	})
 }

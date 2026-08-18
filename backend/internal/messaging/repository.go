@@ -54,6 +54,10 @@ type ChatContext struct {
 	MutedUntil  *time.Time
 	// IsBroadcast marks a group where only staff may post.
 	IsBroadcast bool
+	// CustomRole is the name of the named permission bundle this member
+	// holds, if any. It does not change the hierarchy — who may act on whom
+	// is still decided by the built-in role — it changes what they may do.
+	CustomRole string
 }
 
 func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUID) (*ChatContext, error) {
@@ -65,21 +69,24 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 		autoDelete   *int
 		chatDefaults []byte
 		isBroadcast  *bool
+		roleName     *string
+		rolePerms    []byte
 	)
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT c.id, c.type, c.member_count, c.last_seq,
 		       m.role, m.permissions, m.muted_until,
 		       s.slow_mode_seconds, s.auto_delete_seconds, s.default_permissions,
-		       g.is_broadcast
+		       g.is_broadcast, r.name, r.permissions
 		FROM chats c
 		LEFT JOIN chat_members m ON m.chat_id = c.id AND m.user_id = $2 AND m.left_at IS NULL
 		LEFT JOIN chat_settings s ON s.chat_id = c.id
 		LEFT JOIN groups g ON g.chat_id = c.id
+		LEFT JOIN group_roles r ON r.id = m.custom_role_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`,
 		chatID, userID,
 	).Scan(&result.ChatID, &result.ChatType, &result.MemberCount, &result.LastSeq,
 		&role, &rawPerms, &result.MutedUntil, &slowMode, &autoDelete, &chatDefaults,
-		&isBroadcast)
+		&isBroadcast, &roleName, &rolePerms)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
@@ -112,7 +119,14 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 				permissions.SendStickers = false
 			}
 		}
+		// A named role sits between the chat-wide defaults and the member's
+		// own overrides: it is a bundle handed to several people at once, and
+		// an exception granted to one of them individually still wins.
+		permissions = applyOverrides(permissions, rolePerms)
 		result.Permissions = applyOverrides(permissions, rawPerms)
+		if roleName != nil {
+			result.CustomRole = *roleName
+		}
 	}
 	if slowMode != nil {
 		result.SlowMode = *slowMode
@@ -973,12 +987,12 @@ func (r *Repository) ClearHistory(ctx context.Context, chatID, actorID uuid.UUID
 
 // MarkRead advances the caller's read cursor and clears the unread counters.
 // The cursor never moves backwards.
-func (r *Repository) MarkRead(ctx context.Context, chatID, userID uuid.UUID, uptoSeq int64) (int64, error) {
-	var newSeq int64
+func (r *Repository) MarkRead(ctx context.Context, chatID, userID uuid.UUID, uptoSeq int64) (int64, int64, error) {
+	var newSeq, previousSeq int64
 	err := r.db.Pool.QueryRow(ctx, `
 		UPDATE chat_members
-		SET last_read_seq = GREATEST(last_read_seq, $3),
-		    last_delivered_seq = GREATEST(last_delivered_seq, $3),
+		SET last_read_seq = GREATEST(chat_members.last_read_seq, $3),
+		    last_delivered_seq = GREATEST(chat_members.last_delivered_seq, $3),
 		    unread_count = (
 		        SELECT count(*) FROM messages
 		        WHERE chat_id = $1 AND seq > GREATEST(chat_members.last_read_seq, $3)
@@ -990,15 +1004,97 @@ func (r *Repository) MarkRead(ctx context.Context, chatID, userID uuid.UUID, upt
 		        WHERE mm.user_id = $2 AND m.chat_id = $1
 		          AND m.seq > GREATEST(chat_members.last_read_seq, $3)
 		    )
-		WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL
-		RETURNING last_read_seq`, chatID, userID, uptoSeq).Scan(&newSeq)
+		-- Joining the table to itself is how the pre-update value is read: the
+		-- joined copy sees the snapshot the statement started from, so the old
+		-- cursor comes back alongside the new one. The caller then knows
+		-- exactly which messages this call passed and records a receipt for
+		-- those and no others.
+		FROM chat_members old
+		WHERE old.chat_id = chat_members.chat_id AND old.user_id = chat_members.user_id
+		  AND chat_members.chat_id = $1 AND chat_members.user_id = $2
+		  AND chat_members.left_at IS NULL
+		RETURNING chat_members.last_read_seq, old.last_read_seq`,
+		chatID, userID, uptoSeq).Scan(&newSeq, &previousSeq)
 	if database.IsNoRows(err) {
-		return 0, ErrNotMember
+		return 0, 0, ErrNotMember
 	}
 	if err != nil {
-		return 0, fmt.Errorf("messaging: mark read: %w", err)
+		return 0, 0, fmt.Errorf("messaging: mark read: %w", err)
 	}
-	return newSeq, nil
+	return newSeq, previousSeq, nil
+}
+
+// ReadReceipt is one person who has read a message.
+type ReadReceipt struct {
+	UserID      uuid.UUID  `json:"user_id"`
+	DisplayName string     `json:"display_name"`
+	AvatarID    *uuid.UUID `json:"avatar_media_id,omitempty"`
+	ReadAt      time.Time  `json:"read_at"`
+}
+
+// RecordReads writes a row per message the cursor has just passed (§7).
+//
+// The cursor answers "how far has this person read", which is all a chat list
+// needs. It cannot answer "who has read this message", which is what a sender
+// looks for in a group — so `message_reads` holds that, written from the same
+// call that moves the cursor.
+//
+// It is bounded on purpose. Somebody returning to a chat with two thousand
+// unread messages would otherwise write two thousand rows per member, and the
+// answer people actually want is about recent messages. Older ones fall back
+// to the cursor, which is exact for "read up to here" and always available.
+func (r *Repository) RecordReads(ctx context.Context, chatID, userID uuid.UUID, fromSeq, toSeq int64, limit int) error {
+	if toSeq <= fromSeq {
+		return nil
+	}
+	_, err := r.db.Pool.Exec(ctx, `
+		INSERT INTO message_reads (message_id, user_id)
+		SELECT m.id, $2
+		FROM messages m
+		WHERE m.chat_id = $1 AND m.seq > $3 AND m.seq <= $4
+		  AND m.deleted_at IS NULL
+		  -- A sender has read their own message by definition; a row saying so
+		  -- is noise in every receipt list.
+		  AND (m.sender_id IS NULL OR m.sender_id <> $2)
+		ORDER BY m.seq DESC
+		LIMIT $5
+		ON CONFLICT DO NOTHING`, chatID, userID, fromSeq, toSeq, limit)
+	if err != nil {
+		return fmt.Errorf("messaging: record reads: %w", err)
+	}
+	return nil
+}
+
+// ReadReceipts lists who has read one message.
+//
+// Ordered by when they read it, so the list reads as it happened rather than
+// in whatever order the join produced.
+func (r *Repository) ReadReceipts(ctx context.Context, messageID uuid.UUID, limit int) ([]ReadReceipt, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT rd.user_id,
+		       COALESCE(NULLIF(p.display_name, ''), u.username, '') AS display_name,
+		       p.avatar_media_id, rd.read_at
+		FROM message_reads rd
+		JOIN users u ON u.id = rd.user_id AND u.deleted_at IS NULL
+		LEFT JOIN user_profiles p ON p.user_id = rd.user_id
+		WHERE rd.message_id = $1
+		ORDER BY rd.read_at
+		LIMIT $2`, messageID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("messaging: read receipts: %w", err)
+	}
+	defer rows.Close()
+
+	receipts := []ReadReceipt{}
+	for rows.Next() {
+		var receipt ReadReceipt
+		if err := rows.Scan(&receipt.UserID, &receipt.DisplayName,
+			&receipt.AvatarID, &receipt.ReadAt); err != nil {
+			return nil, err
+		}
+		receipts = append(receipts, receipt)
+	}
+	return receipts, rows.Err()
 }
 
 // React toggles a reaction: sending the same emoji twice removes it (§52).

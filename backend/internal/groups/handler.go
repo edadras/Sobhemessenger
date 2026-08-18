@@ -56,6 +56,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/{chatID}/messages/{messageID}/view", h.recordView)
 	r.Get("/{chatID}/statistics", h.statistics)
 
+	r.Get("/{chatID}/roles", h.roles)
+	r.Post("/{chatID}/roles", h.createRole)
+	r.Put("/{chatID}/roles/{roleID}", h.updateRole)
+	r.Delete("/{chatID}/roles/{roleID}", h.deleteRole)
+	r.Put("/{chatID}/members/{userID}/role-bundle", h.assignRole)
+
 	r.Post("/{chatID}/discussion", h.linkDiscussion)
 	r.Delete("/{chatID}/discussion", h.unlinkDiscussion)
 	r.Get("/{chatID}/messages/{messageID}/comments", h.comments)
@@ -638,4 +644,122 @@ func (h *Handler) comment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, r, http.StatusCreated, map[string]any{"message": comment})
+}
+
+// ---------------------------------------------------------- named roles
+
+type roleBody struct {
+	Name        string          `json:"name"`
+	Permissions map[string]bool `json:"permissions"`
+	Rank        int             `json:"rank,omitempty"`
+}
+
+func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	roles, err := h.service.Roles(r.Context(), chatID, principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"roles": roles})
+}
+
+func (h *Handler) createRole(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body roleBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	role, err := h.service.CreateRole(r.Context(), chatID, principal.UserID,
+		body.Name, body.Permissions, body.Rank)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, map[string]any{"role": role})
+}
+
+func (h *Handler) updateRole(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	roleID, err := pathUUID(r, "roleID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body roleBody
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	role, err := h.service.UpdateRole(r.Context(), chatID, roleID, principal.UserID,
+		body.Name, body.Permissions, body.Rank)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"role": role})
+}
+
+func (h *Handler) deleteRole(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	roleID, err := pathUUID(r, "roleID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.DeleteRole(r.Context(), chatID, roleID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) assignRole(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	userID, err := pathUUID(r, "userID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	// A null role takes the bundle away, which is why it is a pointer rather
+	// than an absent field meaning "leave it".
+	var body struct {
+		RoleID *uuid.UUID `json:"role_id"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.AssignRole(r.Context(), chatID, userID, principal.UserID, body.RoleID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
 }

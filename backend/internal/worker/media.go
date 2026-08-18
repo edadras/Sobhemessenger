@@ -118,7 +118,7 @@ func (r *Runner) scanObject(ctx context.Context, object *media.Media) error {
 		}
 		r.logger.Warn("virus scan failed, continuing",
 			slog.String("media_id", object.ID.String()), slog.Any("error", err))
-		return nil
+		return r.mediaRepo.SetScanResult(ctx, object.ID, "failed", err.Error())
 	}
 
 	if result.Status == "infected" {
@@ -128,15 +128,16 @@ func (r *Runner) scanObject(ctx context.Context, object *media.Media) error {
 		if err := r.storage.Remove(ctx, object.Bucket, object.ObjectKey); err != nil {
 			r.logger.Error("could not remove infected object", slog.Any("error", err))
 		}
-		if err := r.mediaRepo.FinalizeMedia(ctx, object.ID, object.MimeType,
-			object.SizeBytes, nil, "infected"); err != nil {
+		// The signature is recorded, not just logged: a log line is gone in a
+		// week, and the person who uploaded the file will ask what was wrong
+		// with it long after that.
+		if err := r.mediaRepo.SetScanResult(ctx, object.ID, "infected", result.Detail); err != nil {
 			return err
 		}
 		return fmt.Errorf("worker: object is infected: %s", result.Detail)
 	}
 
-	return r.mediaRepo.FinalizeMedia(ctx, object.ID, object.MimeType,
-		object.SizeBytes, nil, result.Status)
+	return r.mediaRepo.SetScanResult(ctx, object.ID, result.Status, result.Detail)
 }
 
 func (r *Runner) processImage(ctx context.Context, object *media.Media) error {

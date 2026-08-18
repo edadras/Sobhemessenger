@@ -412,7 +412,135 @@ func (h *Handler) EditorialRoutes() http.Handler {
 	r.Delete("/categories/{categoryID}", h.deleteCategory)
 	r.Get("/authors", h.authors)
 	r.Put("/authors", h.upsertAuthor)
+
+	r.Get("/articles/{articleID}/gallery", h.gallery)
+	r.Put("/articles/{articleID}/gallery", h.replaceGallery)
+	r.Get("/articles/{articleID}/translations", h.translations)
+	r.Put("/articles/{articleID}/translations/{locale}", h.saveTranslation)
+	r.Post("/articles/{articleID}/translations/{locale}/approve", h.approveTranslation)
+	r.Delete("/articles/{articleID}/translations/{locale}", h.deleteTranslation)
 	return r
+}
+
+// ------------------------------------------------ galleries and translations
+
+func (h *Handler) gallery(w http.ResponseWriter, r *http.Request) {
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+	items, err := h.service.Gallery(r.Context(), articleID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) replaceGallery(w http.ResponseWriter, r *http.Request) {
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+
+	// The whole sequence is sent: a gallery is an order, and moving one image
+	// is a change to the order rather than to that image.
+	var body struct {
+		Items []GalleryItem `json:"items"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.ReplaceGallery(r.Context(), articleID, body.Items); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) translations(w http.ResponseWriter, r *http.Request) {
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+	translations, err := h.service.Translations(r.Context(), articleID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"translations": translations})
+}
+
+func (h *Handler) saveTranslation(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+
+	var body struct {
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle,omitempty"`
+		Body     string `json:"body,omitempty"`
+		Source   string `json:"source,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.SaveTranslation(r.Context(), articleID, Translation{
+		Locale: chi.URLParam(r, "locale"), Title: body.Title,
+		Subtitle: body.Subtitle, Body: body.Body, Source: body.Source,
+	}, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) approveTranslation(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+
+	if err := h.service.ApproveTranslation(r.Context(), articleID,
+		chi.URLParam(r, "locale"), principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) deleteTranslation(w http.ResponseWriter, r *http.Request) {
+	articleID, err := uuid.Parse(chi.URLParam(r, "articleID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("article id must be a UUID"))
+		return
+	}
+	if err := h.service.DeleteTranslation(r.Context(), articleID,
+		chi.URLParam(r, "locale")); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
 }
 
 func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {

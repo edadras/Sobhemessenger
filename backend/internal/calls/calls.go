@@ -11,6 +11,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -330,6 +331,103 @@ func (r *Repository) History(ctx context.Context, userID uuid.UUID, limit int) (
 	return calls, rows.Err()
 }
 
+// RecordSignal keeps a per-device record of what was negotiated (§21).
+//
+// `call_sessions` has been in the schema since migration 0006 and unwritten
+// since. It is the only place a failed call leaves a trace: the relay is
+// stateless by design, so without this a call that never connected is
+// indistinguishable from one that was never attempted.
+//
+// The payloads are stored exactly as they were relayed. Nothing here parses
+// SDP or interprets a candidate — the server does not, must not, and the
+// column comment says so.
+func (r *Repository) RecordSignal(ctx context.Context, callID, userID uuid.UUID, deviceID *uuid.UUID, node, signalType string, payload []byte) error {
+	switch signalType {
+	case "offer", "answer", "candidate":
+	default:
+		// Anything else is relayed and not recorded: the table has columns
+		// for these three and inventing a fourth meaning would be guessing.
+		return nil
+	}
+
+	// One row per participant per call, updated as the negotiation
+	// progresses. A row per signal would grow without bound on a long call,
+	// since candidates keep arriving.
+	_, err := r.db.Pool.Exec(ctx, `
+		INSERT INTO call_sessions (call_id, user_id, device_id, ws_node,
+		                           sdp_offer, sdp_answer, ice_candidates)
+		VALUES ($1, $2, $3, $4,
+		        CASE WHEN $5 = 'offer' THEN $6::text END,
+		        CASE WHEN $5 = 'answer' THEN $6::text END,
+		        CASE WHEN $5 = 'candidate'
+		             THEN jsonb_build_array($6::jsonb) ELSE '[]'::jsonb END)
+		ON CONFLICT (call_id, user_id) DO UPDATE
+		SET device_id = COALESCE(EXCLUDED.device_id, call_sessions.device_id),
+		    ws_node = EXCLUDED.ws_node,
+		    sdp_offer = COALESCE(EXCLUDED.sdp_offer, call_sessions.sdp_offer),
+		    sdp_answer = COALESCE(EXCLUDED.sdp_answer, call_sessions.sdp_answer),
+		    ice_candidates = call_sessions.ice_candidates || EXCLUDED.ice_candidates`,
+		callID, userID, deviceID, node, signalType, payload)
+	if err != nil {
+		return fmt.Errorf("calls: record signal: %w", err)
+	}
+	return nil
+}
+
+// CloseSessions marks a call's session records finished, so a row that is
+// still open means a call that never ended cleanly.
+func (r *Repository) CloseSessions(ctx context.Context, callID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE call_sessions SET closed_at = now()
+		 WHERE call_id = $1 AND closed_at IS NULL`, callID)
+	if err != nil {
+		return fmt.Errorf("calls: close sessions: %w", err)
+	}
+	return nil
+}
+
+// Session is one participant's side of a call, for diagnosis.
+type Session struct {
+	UserID         uuid.UUID  `json:"user_id"`
+	DeviceID       *uuid.UUID `json:"device_id,omitempty"`
+	Node           string     `json:"ws_node,omitempty"`
+	HasOffer       bool       `json:"has_offer"`
+	HasAnswer      bool       `json:"has_answer"`
+	CandidateCount int        `json:"candidate_count"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+}
+
+// Sessions summarises what each side negotiated.
+//
+// The SDP and the candidates themselves are not returned. They are recorded so
+// an operator can see that negotiation happened and how far it got; handing
+// them back over the API would publish the network topology of everyone in the
+// call for no benefit to the caller.
+func (r *Repository) Sessions(ctx context.Context, callID uuid.UUID) ([]Session, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT user_id, device_id, ws_node,
+		       sdp_offer IS NOT NULL, sdp_answer IS NOT NULL,
+		       jsonb_array_length(ice_candidates), created_at, closed_at
+		FROM call_sessions WHERE call_id = $1 ORDER BY created_at`, callID)
+	if err != nil {
+		return nil, fmt.Errorf("calls: list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := []Session{}
+	for rows.Next() {
+		var session Session
+		if err := rows.Scan(&session.UserID, &session.DeviceID, &session.Node,
+			&session.HasOffer, &session.HasAnswer, &session.CandidateCount,
+			&session.CreatedAt, &session.ClosedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
+}
+
 // ---------------------------------------------------------------- service
 
 type Service struct {
@@ -337,11 +435,18 @@ type Service struct {
 	messaging *messaging.Repository
 	bus       *bus.Bus
 	cfg       config.Calls
-	logger    *slog.Logger
+	// nodeID is recorded on each session row. A call whose two sides
+	// negotiated through different nodes is the first thing to look at when
+	// one of them never connected.
+	nodeID string
+	logger *slog.Logger
 }
 
-func NewService(repo *Repository, messagingRepo *messaging.Repository, messageBus *bus.Bus, cfg config.Calls, logger *slog.Logger) *Service {
-	return &Service{repo: repo, messaging: messagingRepo, bus: messageBus, cfg: cfg, logger: logger}
+func NewService(repo *Repository, messagingRepo *messaging.Repository, messageBus *bus.Bus, cfg config.Calls, nodeID string, logger *slog.Logger) *Service {
+	return &Service{
+		repo: repo, messaging: messagingRepo, bus: messageBus,
+		cfg: cfg, nodeID: nodeID, logger: logger,
+	}
 }
 
 // Start places a call to a chat's members.
@@ -486,6 +591,15 @@ func (s *Service) End(ctx context.Context, callID, userID uuid.UUID, reason stri
 		ended = true
 	}
 
+	// A session row still open after the call ended means a call that never
+	// finished cleanly, which is exactly what the record is for.
+	if ended {
+		if err := s.repo.CloseSessions(ctx, callID); err != nil {
+			s.logger.Warn("could not close the call's session records",
+				slog.String("call_id", callID.String()), slog.Any("error", err))
+		}
+	}
+
 	event := map[string]any{"call_id": callID, "user_id": userID, "ended": ended}
 	s.broadcast(call, EventCallEnded, event, uuid.Nil)
 	return nil
@@ -507,6 +621,16 @@ func (s *Service) Signal(ctx context.Context, callID, fromUserID, toUserID uuid.
 		return httpx.NotFound(httpx.CodeNotFound, "That user is not in this call")
 	}
 
+	// Recorded before it is relayed, and never at the cost of relaying it: a
+	// call that cannot be written down is still a call that must connect.
+	if raw, err := json.Marshal(payload); err == nil {
+		if err := s.repo.RecordSignal(ctx, callID, fromUserID, nil,
+			s.nodeID, signalType, raw); err != nil {
+			s.logger.Warn("could not record a call signal",
+				slog.String("call_id", callID.String()), slog.Any("error", err))
+		}
+	}
+
 	s.notify(toUserID, EventCallSignal, map[string]any{
 		"call_id": callID,
 		"from":    fromUserID,
@@ -514,6 +638,21 @@ func (s *Service) Signal(ctx context.Context, callID, fromUserID, toUserID uuid.
 		"payload": payload,
 	})
 	return nil
+}
+
+// Sessions summarises what each side of a call negotiated.
+//
+// For a participant of that call only, and without the SDP or the candidates
+// themselves — those are recorded for diagnosis, not for publication.
+func (s *Service) Sessions(ctx context.Context, callID, userID uuid.UUID) ([]Session, error) {
+	if err := s.requireParticipant(ctx, callID, userID); err != nil {
+		return nil, err
+	}
+	sessions, err := s.repo.Sessions(ctx, callID)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return sessions, nil
 }
 
 // SetMedia updates mute, video and screen-share state.
@@ -645,6 +784,7 @@ func (h *Handler) Routes() http.Handler {
 	r.Post("/{callID}/end", h.end)
 	r.Post("/{callID}/signal", h.signal)
 	r.Put("/{callID}/media", h.setMedia)
+	r.Get("/{callID}/sessions", h.sessions)
 	return r
 }
 
@@ -840,4 +980,26 @@ func (h *Handler) context(r *http.Request) (*httpx.Principal, uuid.UUID, error) 
 		return nil, uuid.Nil, httpx.BadRequest("callID is not a valid UUID")
 	}
 	return principal, callID, nil
+}
+
+// sessions reports what each side of a call negotiated, without the SDP or
+// the candidates themselves.
+func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	callID, err := uuid.Parse(chi.URLParam(r, "callID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("call id must be a UUID"))
+		return
+	}
+
+	sessions, err := h.service.Sessions(r.Context(), callID, principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"sessions": sessions})
 }

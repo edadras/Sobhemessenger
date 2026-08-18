@@ -18,18 +18,21 @@ var ErrNotFound = errors.New("media: not found")
 
 // Media is a stored object plus everything the clients need to render it.
 type Media struct {
-	ID            uuid.UUID       `json:"id"`
-	OwnerID       *uuid.UUID      `json:"owner_id,omitempty"`
-	Kind          string          `json:"kind"`
-	MimeType      string          `json:"mime_type"`
-	FileName      string          `json:"file_name,omitempty"`
-	SizeBytes     int64           `json:"size_bytes"`
-	Width         *int            `json:"width,omitempty"`
-	Height        *int            `json:"height,omitempty"`
-	DurationMs    *int            `json:"duration_ms,omitempty"`
-	Waveform      []int16         `json:"waveform,omitempty"`
-	Blurhash      *string         `json:"blurhash,omitempty"`
-	ScanStatus    string          `json:"scan_status"`
+	ID         uuid.UUID  `json:"id"`
+	OwnerID    *uuid.UUID `json:"owner_id,omitempty"`
+	Kind       string     `json:"kind"`
+	MimeType   string     `json:"mime_type"`
+	FileName   string     `json:"file_name,omitempty"`
+	SizeBytes  int64      `json:"size_bytes"`
+	Width      *int       `json:"width,omitempty"`
+	Height     *int       `json:"height,omitempty"`
+	DurationMs *int       `json:"duration_ms,omitempty"`
+	Waveform   []int16    `json:"waveform,omitempty"`
+	Blurhash   *string    `json:"blurhash,omitempty"`
+	ScanStatus string     `json:"scan_status"`
+	// ScanDetail is the signature an infected file matched, or why a scan
+	// could not be completed. Empty for everything that scanned clean.
+	ScanDetail    string          `json:"scan_detail,omitempty"`
 	ProcessStatus string          `json:"process_status"`
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
@@ -182,6 +185,28 @@ func (r *Repository) FinalizeMedia(ctx context.Context, mediaID uuid.UUID, mime 
 	return nil
 }
 
+// SetScanResult records the outcome of a virus scan and what the scanner said.
+//
+// `scan_detail` holds the signature name for an infected file and the reason
+// for a failed scan. Without it an upload rejected as infected can only be
+// reported as "rejected" — which is no help to the person who uploaded a file
+// they believe is clean, and no help to whoever has to decide whether the
+// scanner is right.
+func (r *Repository) SetScanResult(ctx context.Context, mediaID uuid.UUID, status, detail string) error {
+	// Truncated: a scanner that returns a page of output should not be able to
+	// write a page into every row.
+	if len(detail) > 500 {
+		detail = detail[:500]
+	}
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE media SET scan_status = $2, scan_detail = $3 WHERE id = $1`,
+		mediaID, status, detail)
+	if err != nil {
+		return fmt.Errorf("media: set scan result: %w", err)
+	}
+	return nil
+}
+
 // MarkReady is called by the worker once every variant exists.
 func (r *Repository) MarkReady(ctx context.Context, mediaID uuid.UUID, width, height, durationMs *int, waveform []int16, blurhash *string) error {
 	_, err := r.db.Pool.Exec(ctx, `
@@ -230,12 +255,13 @@ func (r *Repository) ByID(ctx context.Context, id uuid.UUID) (*Media, error) {
 	m := &Media{}
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT id, owner_id, bucket, object_key, kind, mime_type, file_name, size_bytes,
-		       width, height, duration_ms, waveform, blurhash, scan_status, process_status,
+		       width, height, duration_ms, waveform, blurhash, scan_status, scan_detail,
+		       process_status,
 		       metadata, created_at, ready_at
 		FROM media WHERE id = $1 AND deleted_at IS NULL`, id,
 	).Scan(&m.ID, &m.OwnerID, &m.Bucket, &m.ObjectKey, &m.Kind, &m.MimeType, &m.FileName,
 		&m.SizeBytes, &m.Width, &m.Height, &m.DurationMs, &m.Waveform, &m.Blurhash,
-		&m.ScanStatus, &m.ProcessStatus, &m.Metadata, &m.CreatedAt, &m.ReadyAt)
+		&m.ScanStatus, &m.ScanDetail, &m.ProcessStatus, &m.Metadata, &m.CreatedAt, &m.ReadyAt)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
