@@ -45,6 +45,15 @@ func (h *Handler) RegisterChatRoutes(r chi.Router) {
 	r.Delete("/folders/{folderID}", h.deleteFolder)
 	r.Put("/folders/{folderID}/chats/{chatID}", h.setFolderChat)
 	r.Delete("/folders/{folderID}/chats/{chatID}", h.removeFolderChat)
+
+	r.Post("/{chatID}/forum", h.enableForum)
+	r.Delete("/{chatID}/forum", h.disableForum)
+	r.Get("/{chatID}/topics", h.topics)
+	r.Post("/{chatID}/topics", h.createTopic)
+	r.Patch("/{chatID}/topics/{topicID}", h.updateTopic)
+	r.Delete("/{chatID}/topics/{topicID}", h.deleteTopic)
+	r.Get("/{chatID}/topics/{topicID}/messages", h.topicHistory)
+	r.Post("/{chatID}/topics/{topicID}/read", h.markTopicRead)
 }
 
 // RegisterMessageRoutes adds the per-message routes to a shared router, so
@@ -221,6 +230,9 @@ type sendBody struct {
 	Attachments     []Attachment    `json:"attachments,omitempty"`
 	Mentions        []uuid.UUID     `json:"mentions,omitempty"`
 	IsSilent        bool            `json:"is_silent,omitempty"`
+	// TopicID files the message under a forum topic. Absent in a forum means
+	// General; absent anywhere else means nothing.
+	TopicID *uuid.UUID `json:"topic_id,omitempty"`
 }
 
 func (h *Handler) send(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +268,7 @@ func (h *Handler) send(w http.ResponseWriter, r *http.Request) {
 		Attachments:     body.Attachments,
 		Mentions:        body.Mentions,
 		IsSilent:        body.IsSilent,
+		TopicID:         body.TopicID,
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -644,4 +657,208 @@ func (h *Handler) folderContext(r *http.Request) (*httpx.Principal, uuid.UUID, e
 		return nil, uuid.Nil, err
 	}
 	return principal, folderID, nil
+}
+
+// ----------------------------------------------------------- forum topics
+
+func (h *Handler) enableForum(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	topic, err := h.service.EnableForum(r.Context(), chatID, principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"general_topic": topic})
+}
+
+func (h *Handler) disableForum(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.DisableForum(r.Context(), chatID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) topics(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	topics, err := h.service.Topics(r.Context(), chatID, principal.UserID, queryInt(r, "limit", 100))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"topics": topics})
+}
+
+func (h *Handler) createTopic(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Title     string `json:"title"`
+		IconEmoji string `json:"icon_emoji,omitempty"`
+		IconColor int    `json:"icon_color,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	topic, err := h.service.CreateTopic(r.Context(), chatID, principal.UserID,
+		body.Title, body.IconEmoji, body.IconColor)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, map[string]any{"topic": topic})
+}
+
+func (h *Handler) updateTopic(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, topicID, err := h.topicFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	// Pointers throughout: a topic is edited a field at a time, and a whole
+	// object would let a rename silently reopen a topic somebody had closed.
+	var body struct {
+		Title     *string `json:"title,omitempty"`
+		IconEmoji *string `json:"icon_emoji,omitempty"`
+		IconColor *int    `json:"icon_color,omitempty"`
+		IsClosed  *bool   `json:"is_closed,omitempty"`
+		IsHidden  *bool   `json:"is_hidden,omitempty"`
+		IsPinned  *bool   `json:"is_pinned,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	topic, err := h.service.UpdateTopic(r.Context(), chatID, topicID, principal.UserID, TopicUpdate{
+		Title: body.Title, IconEmoji: body.IconEmoji, IconColor: body.IconColor,
+		IsClosed: body.IsClosed, IsHidden: body.IsHidden, IsPinned: body.IsPinned,
+	})
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"topic": topic})
+}
+
+func (h *Handler) deleteTopic(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, topicID, err := h.topicFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.DeleteTopic(r.Context(), chatID, topicID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) topicHistory(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, topicID, err := h.topicFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var beforeSeq, afterSeq *int64
+	if raw := r.URL.Query().Get("before_seq"); raw != "" {
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			httpx.Fail(w, r, httpx.BadRequest("before_seq must be an integer"))
+			return
+		}
+		beforeSeq = &value
+	}
+	if raw := r.URL.Query().Get("after_seq"); raw != "" {
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			httpx.Fail(w, r, httpx.BadRequest("after_seq must be an integer"))
+			return
+		}
+		afterSeq = &value
+	}
+
+	limit := queryInt(r, "limit", 50)
+	messages, err := h.service.TopicHistory(r.Context(), chatID, topicID, principal.UserID,
+		beforeSeq, afterSeq, limit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	meta := httpx.Meta{HasMore: len(messages) == limit}
+	if len(messages) > 0 {
+		meta.NextCursor = strconv.FormatInt(messages[len(messages)-1].Seq, 10)
+	}
+	httpx.JSONWithMeta(w, r, http.StatusOK, map[string]any{"messages": messages}, meta)
+}
+
+func (h *Handler) markTopicRead(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, topicID, err := h.topicFrom(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Seq int64 `json:"seq"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	newSeq, err := h.service.MarkTopicRead(r.Context(), chatID, topicID, principal.UserID, body.Seq)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"topic_id": topicID, "last_read_seq": newSeq,
+	})
+}
+
+func (h *Handler) chatFrom(r *http.Request) (*httpx.Principal, uuid.UUID, error) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	chatID, err := pathUUID(r, "chatID")
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	return principal, chatID, nil
+}
+
+func (h *Handler) topicFrom(r *http.Request) (*httpx.Principal, uuid.UUID, uuid.UUID, error) {
+	principal, chatID, err := h.chatFrom(r)
+	if err != nil {
+		return nil, uuid.Nil, uuid.Nil, err
+	}
+	topicID, err := pathUUID(r, "topicID")
+	if err != nil {
+		return nil, uuid.Nil, uuid.Nil, err
+	}
+	return principal, chatID, topicID, nil
 }

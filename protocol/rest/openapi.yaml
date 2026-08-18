@@ -794,6 +794,163 @@ paths:
         "200": { description: Removed }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/chats/{chatID}/forum:
+    post:
+      tags: [Groups and channels]
+      summary: Turn a group into a forum
+      description: >
+        Creates the General topic and files the group's existing history under
+        it, in one transaction — a group marked as a forum whose messages
+        belong to no topic would render as an empty forum with its history
+        unreachable. Calling it twice returns the same General topic.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "200":
+          description: The General topic
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { description: Only a group can be a forum }
+    delete:
+      tags: [Groups and channels]
+      summary: Turn forum mode off
+      description: >
+        The topics and each message's topic are left in place, so the group
+        reads as an ordinary group now and returns to its topics if it is ever
+        a forum again.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "200": { description: Forum mode is off }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/topics:
+    get:
+      tags: [Groups and channels]
+      summary: List a forum's topics
+      description: >
+        Pinned first, then by most recent message. Each entry carries the
+        caller's own unread count for that topic. Hidden topics are shown to
+        staff, who need to see what they hid, and to nobody else.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 200 } }
+      responses:
+        "200":
+          description: The topics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          topics:
+                            type: array
+                            items: { $ref: "#/components/schemas/ForumTopic" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Groups and channels]
+      summary: Open a topic
+      description: Anyone who may post may open one, which is what makes a forum a forum.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 128 }
+                icon_emoji: { type: string }
+                icon_color: { type: integer }
+      responses:
+        "201": { description: The new topic }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/topics/{topicID}:
+    patch:
+      tags: [Groups and channels]
+      summary: Rename, close, hide or pin a topic
+      description: >
+        Only the fields present are changed. Renaming a topic you opened is
+        yours to do; closing, hiding and pinning are moderation, because
+        closing a topic ends a conversation other people are having in it.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: topicID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, maxLength: 128 }
+                icon_emoji: { type: string }
+                icon_color: { type: integer }
+                is_closed: { type: boolean }
+                is_hidden: { type: boolean }
+                is_pinned: { type: boolean }
+      responses:
+        "200": { description: The updated topic }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Groups and channels]
+      summary: Delete a topic and what was said in it
+      description: >
+        The messages go with it: leaving them behind would put them in a forum
+        with no thread to open them from. The General topic cannot be deleted —
+        it holds the group's converted history.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: topicID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: The General topic cannot be deleted }
+
+  /api/v1/chats/{chatID}/topics/{topicID}/messages:
+    get:
+      tags: [Messages]
+      summary: A page of one topic's messages
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: topicID, in: path, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: before_seq, schema: { type: integer, format: int64 } }
+        - { in: query, name: after_seq, schema: { type: integer, format: int64 } }
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200": { description: Messages, newest first }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/chats/{chatID}/topics/{topicID}/read:
+    post:
+      tags: [Messages]
+      summary: Advance the read cursor inside one topic
+      description: >
+        Unread state is per topic as well as per chat, because a forum member
+        follows some topics and ignores others.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { name: topicID, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq]
+              properties:
+                seq: { type: integer, format: int64 }
+      responses:
+        "200": { description: The new cursor position }
+
   /api/v1/chats/{chatID}/clear-history:
     post:
       tags: [Chats]
@@ -5512,6 +5669,13 @@ components:
           maxItems: 50
           items: { type: string, format: uuid }
         is_silent: { type: boolean }
+        topic_id:
+          type: string
+          format: uuid
+          description: >
+            Files the message under a forum topic. In a forum, omitting it
+            files the message under General rather than leaving it belonging to
+            nothing; outside a forum it is meaningless and is dropped.
 
     Attachment:
       type: object
@@ -5538,6 +5702,18 @@ components:
         payload: { type: object }
         reply_to_id: { type: string, format: uuid }
         forward_from: { type: object }
+        topic_id:
+          type: string
+          format: uuid
+          description: >
+            The forum topic this message is filed under, in a group that is a
+            forum. Absent everywhere else.
+        author_signature:
+          type: string
+          description: >
+            The admin who wrote a channel post, when the channel has signatures
+            on. Copied onto the message as it is sent, so a later rename never
+            rewrites an old attribution.
         attachments:
           type: array
           items: { $ref: "#/components/schemas/Attachment" }
@@ -5895,6 +6071,26 @@ components:
         is_forum:
           type: boolean
           description: Groups only, read-only. Whether the group files its messages under topics.
+
+    ForumTopic:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid }
+        title: { type: string }
+        icon_color: { type: integer }
+        icon_emoji: { type: string }
+        created_by: { type: string, format: uuid, nullable: true }
+        is_general:
+          type: boolean
+          description: The topic a converted group's history is filed under. Exactly one per forum, and it cannot be deleted.
+        is_closed: { type: boolean }
+        is_hidden: { type: boolean }
+        is_pinned: { type: boolean }
+        message_count: { type: integer }
+        unread_count: { type: integer, description: The caller's own, from their per-topic cursor. }
+        last_message_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
 
     ChatFolder:
       type: object

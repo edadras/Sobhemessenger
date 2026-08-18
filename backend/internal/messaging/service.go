@@ -107,6 +107,10 @@ type SendInput struct {
 	// choosing.
 	ReplyMarkup json.RawMessage
 	IsSilent    bool
+	// TopicID files the message under a forum topic. In a forum it is
+	// required in effect: a send that names none is filed under General
+	// rather than left belonging to nothing.
+	TopicID *uuid.UUID
 }
 
 // Send validates, authorises, persists and broadcasts a message.
@@ -162,6 +166,11 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		}
 	}
 
+	topicID, err := s.resolveTopic(ctx, chatCtx, in)
+	if err != nil {
+		return nil, err
+	}
+
 	result, err := s.repo.Send(ctx, SendParams{
 		ChatID:          in.ChatID,
 		SenderID:        in.SenderID,
@@ -176,6 +185,7 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 		Forward:         in.Forward,
 		ReplyMarkup:     in.ReplyMarkup,
 		IsSilent:        in.IsSilent,
+		TopicID:         topicID,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -200,6 +210,48 @@ func (s *Service) Send(ctx context.Context, in SendInput) (*Message, error) {
 	s.metrics.MessagesSent.WithLabelValues(chatCtx.ChatType, in.Type).Inc()
 	s.metrics.MessageSendLatency.Observe(time.Since(start).Seconds())
 	return result.Message, nil
+}
+
+// resolveTopic decides which forum topic a message belongs to.
+//
+// Every message in a forum belongs to exactly one topic, so a send that names
+// none is filed under General rather than left belonging to nothing — which
+// would make it invisible in a client that only ever opens topics. Outside a
+// forum a topic id is meaningless and is dropped rather than stored, so a
+// stale client cannot file messages into a group that no longer has topics.
+func (s *Service) resolveTopic(ctx context.Context, chatCtx *ChatContext, in SendInput) (*uuid.UUID, error) {
+	if chatCtx.ChatType != ChatGroup {
+		return nil, nil
+	}
+	isForum, err := s.repo.IsForum(ctx, chatCtx.ChatID)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	if !isForum {
+		return nil, nil
+	}
+
+	if in.TopicID == nil {
+		general, err := s.repo.GeneralTopic(ctx, chatCtx.ChatID)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		return general, nil
+	}
+
+	topic, err := s.repo.TopicByID(ctx, chatCtx.ChatID, *in.TopicID)
+	if err != nil {
+		if errors.Is(err, ErrTopicNotFound) {
+			return nil, httpx.NotFound(httpx.CodeNotFound, "No such topic")
+		}
+		return nil, httpx.Internal(err)
+	}
+	// A closed topic is closed to the people having the conversation, not to
+	// the staff who closed it — they still need to be able to say why.
+	if topic.IsClosed && !chatCtx.Permissions.EditGroup {
+		return nil, httpx.Forbidden(httpx.CodeForbidden, "That topic is closed")
+	}
+	return &topic.ID, nil
 }
 
 // checkNotRestricted stops a restricted account cold-messaging strangers.

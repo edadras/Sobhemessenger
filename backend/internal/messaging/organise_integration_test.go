@@ -133,6 +133,15 @@ func groupChat(t *testing.T, db *database.DB, owner uuid.UUID, members ...uuid.U
 		chatID); err != nil {
 		t.Fatalf("create chat settings: %v", err)
 	}
+
+	// Production creates the type extension row too, and broadcast mode, the
+	// sticker set, the linked channel and the forum flag all live in it. The
+	// same omission as above, one table over.
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO groups (chat_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+		chatID); err != nil {
+		t.Fatalf("create group extension row: %v", err)
+	}
 	return chatID
 }
 

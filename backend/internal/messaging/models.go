@@ -70,6 +70,9 @@ const (
 	// survives, and so does the other member's copy unless the caller asked
 	// for both.
 	EventChatHistoryCleared = "chat.history_cleared"
+	EventTopicCreated       = "topic.created"
+	EventTopicUpdated       = "topic.updated"
+	EventTopicDeleted       = "topic.deleted"
 )
 
 // Chat is a conversation container of any type.
@@ -254,12 +257,15 @@ type Message struct {
 	// send time rather than resolved on read: an admin who is later removed,
 	// renamed or deleted must not silently rewrite the attribution on posts
 	// they made while they were there.
-	AuthorSignature string     `json:"author_signature,omitempty"`
-	IsPinned        bool       `json:"is_pinned"`
-	ViewCount       int        `json:"view_count,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	EditedAt        *time.Time `json:"edited_at,omitempty"`
-	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	AuthorSignature string `json:"author_signature,omitempty"`
+	// TopicID is the forum topic this message is filed under, in a group that
+	// is a forum. Absent everywhere else.
+	TopicID   *uuid.UUID `json:"topic_id,omitempty"`
+	IsPinned  bool       `json:"is_pinned"`
+	ViewCount int        `json:"view_count,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	EditedAt  *time.Time `json:"edited_at,omitempty"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 type ForwardInfo struct {

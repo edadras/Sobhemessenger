@@ -366,6 +366,9 @@ type SendParams struct {
 	// responsible for not asking twice. The one caller that does holds a
 	// primary key on the post it is mirroring, which is a stronger guarantee.
 	AsChat bool
+	// TopicID files the message under a forum topic. Nil in every chat that
+	// is not a forum, and never nil in one that is.
+	TopicID *uuid.UUID
 }
 
 // SendResult carries the stored message plus who must be notified.
@@ -417,10 +420,10 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			INSERT INTO messages (
 				chat_id, seq, sender_id, client_message_id, type, content, entities, payload,
 				reply_to_id, forward_from_chat_id, forward_from_message_id, forward_from_user_id,
-				forward_signature, is_silent, reply_markup, author_signature
+				forward_signature, is_silent, reply_markup, topic_id, author_signature
 			) VALUES ($1, $2, CASE WHEN $16::boolean THEN NULL ELSE $3::uuid END,
 			          $4, $5, $6, COALESCE($7, '[]'::jsonb), COALESCE($8, '{}'::jsonb),
-			          $9, $10, $11, $12, $13, $14, $15,
+			          $9, $10, $11, $12, $13, $14, $15, $17,
 			          -- Resolved here rather than in Go so the name is taken
 			          -- inside the same transaction that assigns the sequence:
 			          -- a separate read could catch the admin mid-rename and
@@ -441,15 +444,16 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			          ), ''))
 			RETURNING id, chat_id, seq, sender_id, client_message_id, type, content,
 			          entities, payload, reply_to_id, is_pinned, created_at, edited_at, deleted_at,
-			          reply_markup, author_signature`,
+			          reply_markup, topic_id, author_signature`,
 			p.ChatID, seq, p.SenderID, p.ClientMessageID, p.Type, p.Content,
 			nullableJSON(p.Entities), nullableJSON(p.Payload), p.ReplyToID,
 			forwardChat(p.Forward), forwardMessage(p.Forward), forwardUser(p.Forward),
 			forwardSignature(p.Forward), p.IsSilent, nullableJSON(p.ReplyMarkup), p.AsChat,
+			p.TopicID,
 		).Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID, &message.ClientMessageID,
 			&message.Type, &message.Content, &message.Entities, &message.Payload, &message.ReplyToID,
 			&message.IsPinned, &message.CreatedAt, &message.EditedAt, &message.DeletedAt,
-			&message.ReplyMarkup, &message.AuthorSignature)
+			&message.ReplyMarkup, &message.TopicID, &message.AuthorSignature)
 		if err != nil {
 			return fmt.Errorf("messaging: insert message: %w", err)
 		}
@@ -480,6 +484,24 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			SET last_seq = $2, last_message_id = $3, last_message_at = $4, updated_at = now()
 			WHERE id = $1`, p.ChatID, seq, message.ID, message.CreatedAt); err != nil {
 			return fmt.Errorf("messaging: advance chat: %w", err)
+		}
+
+		if p.TopicID != nil {
+			// The topic's counters move with the message rather than being
+			// recomputed later: a topic list that lags the messages in it is
+			// the same defect as a chat list that lags its chats.
+			if _, err := tx.Exec(ctx, `
+				UPDATE forum_topics
+				SET message_count = message_count + 1, last_message_at = $2
+				WHERE id = $1`, *p.TopicID, message.CreatedAt); err != nil {
+				return fmt.Errorf("messaging: advance topic: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE forum_topic_reads
+				SET unread_count = unread_count + 1
+				WHERE topic_id = $1 AND user_id <> $2`, *p.TopicID, p.SenderID); err != nil {
+				return fmt.Errorf("messaging: bump topic unread: %w", err)
+			}
 		}
 
 		// The sender's own cursor moves with the message: their device already
@@ -656,7 +678,7 @@ func (r *Repository) History(ctx context.Context, q HistoryQuery) ([]Message, er
 		       CASE WHEN m.deleted_at IS NULL THEN m.content ELSE '' END,
 		       m.entities, m.payload, m.reply_to_id,
 		       m.forward_from_chat_id, m.forward_from_message_id, m.forward_from_user_id,
-		       m.forward_signature, m.author_signature, m.is_pinned, m.view_count,
+		       m.forward_signature, m.author_signature, m.topic_id, m.is_pinned, m.view_count,
 		       m.created_at, m.edited_at, m.deleted_at, m.reply_markup,
 		       COALESCE((
 		           SELECT jsonb_agg(jsonb_build_object(
@@ -711,7 +733,7 @@ func (r *Repository) History(ctx context.Context, q HistoryQuery) ([]Message, er
 		if err := rows.Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID,
 			&message.ClientMessageID, &message.Type, &message.Content, &message.Entities,
 			&message.Payload, &message.ReplyToID, &forwardChatID, &forwardMsgID, &forwardUserID,
-			&forwardSig, &message.AuthorSignature, &message.IsPinned, &message.ViewCount,
+			&forwardSig, &message.AuthorSignature, &message.TopicID, &message.IsPinned, &message.ViewCount,
 			&message.CreatedAt, &message.EditedAt, &message.DeletedAt,
 			&message.ReplyMarkup, &rawAttach, &rawReactions); err != nil {
 			return nil, err
