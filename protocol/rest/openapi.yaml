@@ -871,6 +871,108 @@ paths:
         "200": { description: Unblocked }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/contacts/requests:
+    get:
+      tags: [Contacts]
+      summary: List contact requests
+      description: >
+        Incoming lists only what is still pending — a resolved incoming request
+        needs no action. Outgoing keeps its history, so the sender can see that
+        what they asked for was declined rather than wondering whether it ever
+        arrived.
+      parameters:
+        - name: direction
+          in: query
+          schema: { type: string, enum: [incoming, outgoing], default: incoming }
+      responses:
+        "200":
+          description: The requests, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          direction: { type: string }
+                          requests:
+                            type: array
+                            items: { $ref: "#/components/schemas/ContactRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Contacts]
+      summary: Ask someone to become a mutual contact
+      description: >
+        Adding a contact is one-sided and silent; this asks the other person to
+        know you back, and acceptance writes both address-book entries at once.
+        Sending the same request twice returns the one already open rather than
+        creating a second.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                message: { type: string, maxLength: 280 }
+      responses:
+        "201":
+          description: The request
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          request: { $ref: "#/components/schemas/ContactRequest" }
+        "403":
+          description: >
+            That person does not accept contact requests. Blocking and a
+            privacy rule give the same answer, so a request cannot be used to
+            discover that a particular person has blocked you.
+        "409": { description: You are already contacts }
+
+  /api/v1/contacts/requests/{requestID}/accept:
+    post:
+      tags: [Contacts]
+      summary: Accept a contact request
+      description: Writes both address-book entries in the same transaction as the status change.
+      parameters:
+        - { name: requestID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Accepted }
+        "404": { description: No such request, or not yours to resolve }
+        "409": { description: Already resolved }
+
+  /api/v1/contacts/requests/{requestID}/reject:
+    post:
+      tags: [Contacts]
+      summary: Decline a contact request
+      parameters:
+        - { name: requestID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Rejected }
+        "404": { description: No such request, or not yours to resolve }
+        "409": { description: Already resolved }
+
+  /api/v1/contacts/requests/{requestID}:
+    delete:
+      tags: [Contacts]
+      summary: Withdraw a request you sent
+      parameters:
+        - { name: requestID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Cancelled }
+        "404": { description: No such request, or not yours to cancel }
+        "409": { description: Already resolved }
+
   /api/v1/secret/chats:
     post:
       tags: [Secret chats]
@@ -5497,6 +5599,22 @@ components:
         is_forum:
           type: boolean
           description: Groups only, read-only. Whether the group files its messages under topics.
+
+    ContactRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        requester_id: { type: string, format: uuid }
+        target_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted, rejected, cancelled] }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        display_name:
+          type: string
+          description: The other party's name, so a list renders without a lookup per row.
+        username: { type: string, nullable: true }
+        avatar_media_id: { type: string, format: uuid, nullable: true }
 
     InviteLink:
       type: object

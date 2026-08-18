@@ -538,7 +538,87 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/blocked", h.blocked)
 	r.Post("/blocked", h.block)
 	r.Delete("/blocked/{userID}", h.unblock)
+
+	r.Get("/requests", h.requests)
+	r.Post("/requests", h.sendRequest)
+	r.Post("/requests/{requestID}/accept", h.acceptRequest)
+	r.Post("/requests/{requestID}/reject", h.rejectRequest)
+	r.Delete("/requests/{requestID}", h.cancelRequest)
 	return r
+}
+
+func (h *Handler) requests(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	direction := r.URL.Query().Get("direction")
+	requests, err := h.service.Requests(r.Context(), principal.UserID, direction, 100)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"requests": requests, "direction": direction,
+	})
+}
+
+func (h *Handler) sendRequest(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		UserID  uuid.UUID `json:"user_id"`
+		Message string    `json:"message,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	request, err := h.service.SendRequest(r.Context(), principal.UserID, body.UserID, body.Message)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, map[string]any{"request": request})
+}
+
+func (h *Handler) acceptRequest(w http.ResponseWriter, r *http.Request) {
+	h.resolveRequest(w, r, "accepted")
+}
+
+func (h *Handler) rejectRequest(w http.ResponseWriter, r *http.Request) {
+	h.resolveRequest(w, r, "rejected")
+}
+
+func (h *Handler) cancelRequest(w http.ResponseWriter, r *http.Request) {
+	h.resolveRequest(w, r, "cancelled")
+}
+
+func (h *Handler) resolveRequest(w http.ResponseWriter, r *http.Request, status string) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	requestID, err := uuid.Parse(chi.URLParam(r, "requestID"))
+	if err != nil {
+		httpx.Fail(w, r, httpx.BadRequest("request id must be a UUID"))
+		return
+	}
+
+	request, err := h.service.ResolveRequest(r.Context(), requestID, principal.UserID, status)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"request": request})
 }
 
 func (h *Handler) discoveryParameters(w http.ResponseWriter, r *http.Request) {
