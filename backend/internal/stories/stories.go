@@ -20,6 +20,7 @@ import (
 
 	"github.com/sobh/messenger/backend/internal/database"
 	"github.com/sobh/messenger/backend/internal/httpx"
+	"github.com/sobh/messenger/backend/internal/messaging"
 )
 
 var ErrNotFound = errors.New("stories: not found")
@@ -288,9 +289,15 @@ func (r *Repository) CloseFriends(ctx context.Context, ownerID uuid.UUID) ([]uui
 
 type Service struct {
 	repo *Repository
+	// chats resolves the caller's standing in a chat, which is how posting a
+	// story *as a channel* is authorised. Without it the channel id in the
+	// request body was taken at face value.
+	chats *messaging.Repository
 }
 
-func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+func NewService(repo *Repository, chats *messaging.Repository) *Service {
+	return &Service{repo: repo, chats: chats}
+}
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*Story, error) {
 	switch in.Type {
@@ -323,6 +330,33 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Story, error) {
 	if utf8.RuneCountInString(in.Caption) > 2000 {
 		return nil, httpx.Validation("Caption is too long").
 			WithField("caption", "exceeds the maximum length")
+	}
+
+	// Posting as a channel is an administrative act, and the channel is named
+	// by the client. Until this check existed, anyone who knew a public
+	// channel's id could publish a story that appeared to come from it.
+	if in.ChannelChatID != nil {
+		chatCtx, err := s.chats.ChatContextFor(ctx, *in.ChannelChatID, in.AuthorID)
+		if err != nil {
+			if errors.Is(err, messaging.ErrNotFound) {
+				return nil, httpx.NotFound(httpx.CodeChatNotFound, "Channel not found")
+			}
+			return nil, httpx.Internal(err)
+		}
+		if chatCtx.ChatType != messaging.ChatChannel {
+			return nil, httpx.Validation("Only a channel can publish a story").
+				WithField("channel_chat_id", "must be a channel")
+		}
+		// Not a member reports as not found rather than forbidden: whether a
+		// private channel exists is not something an outsider should learn
+		// from a failed post.
+		if !chatCtx.IsMember {
+			return nil, httpx.NotFound(httpx.CodeChatNotFound, "Channel not found")
+		}
+		if !chatCtx.Permissions.PostStories {
+			return nil, httpx.Forbidden(httpx.CodePermissionDenied,
+				"You cannot publish stories for this channel")
+		}
 	}
 
 	story, err := s.repo.Create(ctx, in)

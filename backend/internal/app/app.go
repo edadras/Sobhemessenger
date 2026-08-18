@@ -233,7 +233,7 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 
 	communitiesService := communities.NewService(communities.NewRepository(db), groupsService)
 
-	storiesService := stories.NewService(stories.NewRepository(db))
+	storiesService := stories.NewService(stories.NewRepository(db), messagingRepo)
 	pollsService := polls.NewService(polls.NewRepository(db), messagingService)
 	callsService := calls.NewService(calls.NewRepository(db), messagingRepo,
 		messageBus, cfg.Calls, logger)

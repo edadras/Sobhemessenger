@@ -79,7 +79,10 @@ class _StoryComposerScreenState extends ConsumerState<StoryComposerScreen> {
       }
 
       await ref.read(storiesRepositoryProvider).post(
-            type: mediaId == null ? 'text' : 'photo',
+            // 'image', not 'photo': that is what the server accepts and what
+            // the CHECK on stories.type allows. The composer said 'photo', so
+            // every picture story was refused as an unsupported type.
+            type: mediaId == null ? 'text' : 'image',
             caption: _caption.text.trim(),
             background: mediaId == null
                 ? _hex(_backgrounds(palette)[_backgroundIndex])

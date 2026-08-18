@@ -19,14 +19,20 @@ def call(method, path, token=None, body=None):
         try: return e.code, json.loads(e.read().decode() or "{}")
         except Exception: return e.code, {}
 
-def signin(phone):
-    _, b = call("POST", "/auth/otp/request", body={"phone": phone})
+def signin(phone=None):
+    # A fresh number each run. Fixed ones meant a second run inside the OTP
+    # resend window died at sign-in, which reads as the whole probe failing
+    # rather than as the limiter working.
+    phone = phone or "+98915" + "".join(secrets.choice("0123456789") for _ in range(7))
+    status, b = call("POST", "/auth/otp/request", body={"phone": phone})
+    if "data" not in b:
+        raise SystemExit(f"could not request an OTP for {phone}: {status} {b}")
     _, b = call("POST", "/auth/otp/verify", body={"phone": phone, "code": b["data"]["debug_code"],
         "device_name": "d", "platform": "android", "app_version": "1.0.0"})
     return b["data"]["access_token"], b["data"]["user_id"]
 
-A, AID = signin("+989150000001")
-B, BID = signin("+989150000002")
+A, AID = signin()
+B, BID = signin()
 _, b = call("POST", "/chats/private", A, {"user_id": BID}); CHAT = b["data"]["chat_id"]
 _, b = call("POST", "/chats", A, {"type": "group", "title": "گروه", "member_ids": [BID]})
 GROUP = b["data"]["chat_id"]
@@ -59,9 +65,23 @@ check("chats: mute until", "PUT", f"/chats/{CHAT}/mute",
 check("contacts: sync", "POST", "/contacts/sync",
       {"replace": False, "entries": [{"digest": secrets.token_hex(32),
                                       "first_name": "الف", "last_name": "ب"}]})
-# stories_repository.post
+# stories_repository.post — both branches of the composer, because only the
+# text one was covered and the picture one sent a type the server rejects.
 check("stories: post text", "POST", "/stories",
       {"type": "text", "caption": "متن", "privacy": "everyone"})
+# The picture branch of the composer. What is being checked is the *type* the
+# app sends, not the upload: this probe has no media fixture, so the story is
+# expected to be refused for the missing media and must not be refused for the
+# type. Sending "photo" — which the app did until this was found — fails here.
+_s, _r = call("POST", "/stories", A,
+              {"type": "image", "caption": "عکس", "privacy": "everyone"})
+_fields = ((_r.get("error") or {}).get("fields") or {})
+if "type" in _fields:
+    fails.append(("stories: post a picture", _s, "type rejected",
+                  str(_fields.get("type")), _fields))
+    print(f"  FAIL {'stories: post a picture':44} {_s} the server does not accept this story type")
+else:
+    print(f"  ok   {'stories: post a picture':44} {_s} type accepted")
 # chat_repository markRead / typing / draft
 check("chats: mark read", "POST", f"/chats/{CHAT}/read", {"seq": 1})
 check("chats: typing", "POST", f"/chats/{CHAT}/typing", {"typing": True})

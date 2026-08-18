@@ -5,6 +5,7 @@ package messaging
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -156,6 +157,64 @@ type Permissions struct {
 	ManageAdmins   bool `json:"manage_admins"`
 	ManageCalls    bool `json:"manage_calls"`
 	ManageInvites  bool `json:"manage_invites"`
+	// PostStories publishes a story on behalf of the chat rather than the
+	// person. `group_permissions` has declared this key since migration 0005;
+	// it had no field here, so granting it did nothing.
+	PostStories bool `json:"post_stories"`
+}
+
+// PermissionKeys is the vocabulary a permission override may use, and what
+// each key applies to.
+//
+// The same list lives in `group_permissions`, which the schema calls the
+// canonical one. Duplicating it here rather than querying it keeps an
+// administrative check off a database round trip; an integration test asserts
+// the two agree exactly, so they cannot drift without the build failing.
+var PermissionKeys = map[string]string{
+	"send_messages":   "both",
+	"send_media":      "both",
+	"send_files":      "both",
+	"send_polls":      "both",
+	"send_stickers":   "group",
+	"embed_links":     "both",
+	"add_members":     "both",
+	"remove_members":  "both",
+	"ban_members":     "both",
+	"pin_messages":    "both",
+	"edit_group":      "both",
+	"delete_messages": "both",
+	"manage_admins":   "both",
+	"manage_calls":    "group",
+	"manage_invites":  "both",
+	"post_stories":    "channel",
+}
+
+// UnknownPermissionKeys returns the keys that are not in the vocabulary, or
+// that are but do not apply to this kind of chat.
+//
+// Silently ignoring an unknown key is the worst of the three options: the
+// caller is told the restriction was applied, the database records it, and it
+// does nothing. A typo then looks exactly like a permission that does not
+// work.
+func UnknownPermissionKeys(permissions map[string]bool, chatType string) []string {
+	var unknown []string
+	for key := range permissions {
+		appliesTo, ok := PermissionKeys[key]
+		if !ok {
+			unknown = append(unknown, key)
+			continue
+		}
+		// A private chat has no permission model of its own, so nothing is
+		// rejected for it here; the resolver already ignores what cannot apply.
+		if chatType == ChatGroup && appliesTo == "channel" {
+			unknown = append(unknown, key)
+		}
+		if chatType == ChatChannel && appliesTo == "group" {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
 }
 
 // PermissionsForRole returns the defaults a role carries before any per-member
@@ -168,13 +227,14 @@ func PermissionsForRole(role, chatType string) Permissions {
 			SendStickers: true, EmbedLinks: true, AddMembers: true, RemoveMembers: true,
 			BanMembers: true, PinMessages: true, EditGroup: true, DeleteMessages: true,
 			ManageAdmins: true, ManageCalls: true, ManageInvites: true,
+			PostStories: true,
 		}
 	case RoleAdmin:
 		return Permissions{
 			SendMessages: true, SendMedia: true, SendFiles: true, SendPolls: true,
 			SendStickers: true, EmbedLinks: true, AddMembers: true, RemoveMembers: true,
 			BanMembers: true, PinMessages: true, EditGroup: true, DeleteMessages: true,
-			ManageCalls: true, ManageInvites: true,
+			ManageCalls: true, ManageInvites: true, PostStories: true,
 		}
 	case RoleModerator:
 		return Permissions{
@@ -223,7 +283,7 @@ func applyOverrides(base Permissions, raw []byte) Permissions {
 		"ban_members": &base.BanMembers, "pin_messages": &base.PinMessages,
 		"edit_group": &base.EditGroup, "delete_messages": &base.DeleteMessages,
 		"manage_admins": &base.ManageAdmins, "manage_calls": &base.ManageCalls,
-		"manage_invites": &base.ManageInvites,
+		"manage_invites": &base.ManageInvites, "post_stories": &base.PostStories,
 	}
 	for key, value := range overrides {
 		if target, ok := targets[key]; ok {

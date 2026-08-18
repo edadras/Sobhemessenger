@@ -3639,13 +3639,19 @@ paths:
               type: object
               required: [type]
               properties:
-                type: { type: string, enum: [photo, video, text] }
+                type: { type: string, enum: [image, video, text] }
                 media_id: { type: string, format: uuid, nullable: true }
                 channel_chat_id:
                   type: string
                   format: uuid
                   nullable: true
-                  description: Post as a channel rather than as the caller.
+                  description: >
+                    Post as a channel rather than as the caller. It needs the
+                    `post_stories` permission on that channel: the id comes
+                    from the client, so without the check anyone knowing a
+                    public channel's id could publish as it. A channel the
+                    caller is not in reports 404 rather than 403, so a failed
+                    post does not reveal that a private channel exists.
                 caption: { type: string }
                 background: { type: string }
                 privacy: { type: string, enum: [everyone, contacts, close_friends, selected], default: contacts }
@@ -3662,6 +3668,7 @@ paths:
                   - properties:
                       data: { $ref: "#/components/schemas/Story" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: You cannot publish stories for that channel }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /api/v1/stories/close-friends:
@@ -6026,7 +6033,16 @@ components:
           additionalProperties: { type: boolean }
           description: |
             What ordinary members may do, chat-wide. Only the keys present are
-            changed. It sits under each member's own overrides, so a chat that
+            changed. A key outside the vocabulary — or one that does not apply
+            to this kind of chat, like `post_stories` on a group — is refused
+            with 422 rather than stored and ignored, so a typo cannot look like
+            a permission that does not work.
+
+            The vocabulary is: send_messages, send_media, send_files,
+            send_polls, send_stickers (groups), embed_links, add_members,
+            remove_members, ban_members, pin_messages, edit_group,
+            delete_messages, manage_admins, manage_calls (groups),
+            manage_invites, post_stories (channels). It sits under each member's own overrides, so a chat that
             forbids media can still grant one person an exception, and it does
             not apply to owners, admins or moderators — applying it to them
             would let one switch lock the staff out of moderating the chat they

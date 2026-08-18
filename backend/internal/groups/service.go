@@ -252,6 +252,10 @@ func (s *Service) SetRole(ctx context.Context, chatID, actorID, targetID uuid.UU
 			"You cannot grant a role higher than your own")
 	}
 
+	if err := rejectUnknownPermissions(permissions, chatCtx.ChatType); err != nil {
+		return err
+	}
+
 	if err := s.repo.SetRole(ctx, chatID, targetID, role, permissions, customTitle); err != nil {
 		if errors.Is(err, ErrNotMember) {
 			return httpx.NotFound(httpx.CodeNotFound, "That user is not a member")
@@ -345,9 +349,10 @@ func (s *Service) Update(ctx context.Context, chatID, actorID uuid.UUID, title, 
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, chatID, actorID uuid.UUID, settings Settings) error {
-	if _, err := s.authorize(ctx, chatID, actorID, func(p messaging.Permissions) bool {
+	chatCtx, err := s.authorize(ctx, chatID, actorID, func(p messaging.Permissions) bool {
 		return p.EditGroup
-	}, "You cannot change this chat's settings"); err != nil {
+	}, "You cannot change this chat's settings")
+	if err != nil {
 		return err
 	}
 
@@ -358,6 +363,10 @@ func (s *Service) UpdateSettings(ctx context.Context, chatID, actorID uuid.UUID,
 	if settings.MaxMembers < 2 || settings.MaxMembers > 1000000 {
 		return httpx.Validation("Member limit is out of range").
 			WithField("max_members", "between 2 and 1000000")
+	}
+
+	if err := rejectUnknownPermissions(settings.DefaultPermissions, chatCtx.ChatType); err != nil {
+		return err
 	}
 
 	if settings.StickerSet != nil {
@@ -628,6 +637,21 @@ func (s *Service) Discover(ctx context.Context, chatType, query string, limit in
 		return nil, httpx.Internal(err)
 	}
 	return chats, nil
+}
+
+// rejectUnknownPermissions refuses a permission map naming a key that is not
+// in the vocabulary, or one that does not apply to this kind of chat.
+//
+// Without this the key is stored and the resolver ignores it, so the caller is
+// told a restriction was applied that will never take effect — and a typo is
+// indistinguishable from a permission that does not work.
+func rejectUnknownPermissions(permissions map[string]bool, chatType string) error {
+	unknown := messaging.UnknownPermissionKeys(permissions, chatType)
+	if len(unknown) == 0 {
+		return nil
+	}
+	return httpx.Validation("That is not a permission this chat has").
+		WithField("permissions", "unknown or inapplicable: "+strings.Join(unknown, ", "))
 }
 
 // authorize is the single gate every administrative action passes through.
