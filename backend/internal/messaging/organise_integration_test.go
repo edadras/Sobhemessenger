@@ -577,7 +577,7 @@ func TestAScheduledPostIsNotYetInTheConversation(t *testing.T) {
 	live := send(t, repo, chatID, author, "sent now")
 	scheduleAt(t, repo, chatID, author, "sent later", time.Now().Add(time.Hour))
 
-	history, err := repo.History(ctx, chatID, reader, nil, nil, 50)
+	history, err := repo.History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: reader, Limit: 50})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -616,7 +616,7 @@ func TestPublishingTurnsAQueuedPostIntoAnOrdinaryMessage(t *testing.T) {
 		t.Fatalf("published %d posts, want 1", published)
 	}
 
-	history, err := repo.History(ctx, chatID, reader, nil, nil, 50)
+	history, err := repo.History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: reader, Limit: 50})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}

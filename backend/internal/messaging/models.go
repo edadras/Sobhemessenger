@@ -249,11 +249,17 @@ type Message struct {
 	// there. It is its own field rather than part of Payload because Payload is
 	// shaped by the message type and a keyboard is orthogonal to all of them.
 	ReplyMarkup json.RawMessage `json:"reply_markup,omitempty"`
-	IsPinned    bool            `json:"is_pinned"`
-	ViewCount   int             `json:"view_count,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	EditedAt    *time.Time      `json:"edited_at,omitempty"`
-	DeletedAt   *time.Time      `json:"deleted_at,omitempty"`
+	// AuthorSignature names the admin who wrote a channel post, when the
+	// channel has signatures switched on. It is copied onto the message at
+	// send time rather than resolved on read: an admin who is later removed,
+	// renamed or deleted must not silently rewrite the attribution on posts
+	// they made while they were there.
+	AuthorSignature string     `json:"author_signature,omitempty"`
+	IsPinned        bool       `json:"is_pinned"`
+	ViewCount       int        `json:"view_count,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	EditedAt        *time.Time `json:"edited_at,omitempty"`
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
 }
 
 type ForwardInfo struct {

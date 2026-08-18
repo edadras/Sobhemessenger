@@ -396,7 +396,10 @@ func (s *Service) History(ctx context.Context, chatID, userID uuid.UUID, beforeS
 		return nil, httpx.Forbidden(httpx.CodeNotChatMember, "You are not a member of this chat")
 	}
 
-	messages, err := s.repo.History(ctx, chatID, userID, beforeSeq, afterSeq, limit)
+	messages, err := s.repo.History(ctx, HistoryQuery{
+		ChatID: chatID, ViewerID: userID,
+		BeforeSeq: beforeSeq, AfterSeq: afterSeq, Limit: limit,
+	})
 	if err != nil {
 		return nil, httpx.Internal(err)
 	}

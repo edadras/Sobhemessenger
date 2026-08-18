@@ -31,7 +31,9 @@ func privateChat(t *testing.T, db *database.DB, a, b uuid.UUID) uuid.UUID {
 
 func historySeqs(t *testing.T, repo *messaging.Repository, chatID, viewerID uuid.UUID) []int64 {
 	t.Helper()
-	messages, err := repo.History(context.Background(), chatID, viewerID, nil, nil, 100)
+	messages, err := repo.History(context.Background(), messaging.HistoryQuery{
+		ChatID: chatID, ViewerID: viewerID, Limit: 100,
+	})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}

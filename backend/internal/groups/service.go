@@ -27,6 +27,10 @@ const (
 // https://sobh.app/joinchat/<username> (§12).
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{4,31}$`)
 
+// stickerSetSlug mirrors the pattern the stickers module mints slugs with, so
+// an obviously malformed one is rejected before it reaches a lookup.
+var stickerSetSlug = regexp.MustCompile(`^[a-z][a-z0-9_]{2,31}$`)
+
 // Service enforces who may administer a group or channel.
 //
 // Every mutation goes through the same gate: load the caller's membership,
@@ -35,13 +39,22 @@ var usernamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{4,31}$`)
 type Service struct {
 	repo      *Repository
 	messaging *messaging.Repository
-	bus       *bus.Bus
-	cfg       *config.Config
-	logger    *slog.Logger
+	// messagingService is needed only where this module has to *send* rather
+	// than read: posting a comment is an ordinary send into the discussion
+	// group and must go through the same validation, permissions and rate
+	// limits as any other message, so it is routed through the service rather
+	// than reimplemented against the repository.
+	messagingService *messaging.Service
+	bus              *bus.Bus
+	cfg              *config.Config
+	logger           *slog.Logger
 }
 
-func NewService(repo *Repository, messagingRepo *messaging.Repository, messageBus *bus.Bus, cfg *config.Config, logger *slog.Logger) *Service {
-	return &Service{repo: repo, messaging: messagingRepo, bus: messageBus, cfg: cfg, logger: logger}
+func NewService(repo *Repository, messagingRepo *messaging.Repository, messagingService *messaging.Service, messageBus *bus.Bus, cfg *config.Config, logger *slog.Logger) *Service {
+	return &Service{
+		repo: repo, messaging: messagingRepo, messagingService: messagingService,
+		bus: messageBus, cfg: cfg, logger: logger,
+	}
 }
 
 // CreateInput describes a new group or channel.
@@ -347,7 +360,20 @@ func (s *Service) UpdateSettings(ctx context.Context, chatID, actorID uuid.UUID,
 			WithField("max_members", "between 2 and 1000000")
 	}
 
+	if settings.StickerSet != nil {
+		normalised := strings.ToLower(strings.TrimSpace(*settings.StickerSet))
+		if normalised != "" && !stickerSetSlug.MatchString(normalised) {
+			return httpx.Validation("That is not a sticker set slug").
+				WithField("sticker_set", "3 to 32 characters, starting with a letter")
+		}
+		settings.StickerSet = &normalised
+	}
+
 	if err := s.repo.UpdateSettings(ctx, chatID, settings); err != nil {
+		if errors.Is(err, ErrStickerSetNotFound) {
+			return httpx.Validation("No sticker set has that name").
+				WithField("sticker_set", "must name an existing set")
+		}
 		return httpx.Internal(err)
 	}
 	return nil

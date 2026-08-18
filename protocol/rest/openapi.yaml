@@ -2838,6 +2838,109 @@ paths:
               schema: { $ref: "#/components/schemas/Envelope" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/v1/chats/{chatID}/discussion:
+    post:
+      tags: [Groups and channels]
+      summary: Link a discussion group to a channel
+      description: >
+        Attaches a group to a channel so its posts can carry comments. The
+        caller must be entitled to edit both: linking hands the channel's posts
+        to the group and the group's members the channel's audience.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group_chat_id]
+              properties:
+                group_chat_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Linked }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: One of those chats is already linked to another }
+    delete:
+      tags: [Groups and channels]
+      summary: Detach the discussion group
+      description: >
+        The threads already mirrored are left alone — they are real messages in
+        a real group, and other people's replies are not the channel's to
+        delete.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+      responses:
+        "200": { description: Detached }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/chats/{chatID}/messages/{messageID}/comments:
+    get:
+      tags: [Groups and channels]
+      summary: Read the comments on a channel post
+      description: >
+        Comments are ordinary replies to the post's mirrored copy in the
+        discussion group, so everything that applies to a message applies to a
+        comment. The mirror is made as the post goes out; for a post that
+        predates the link, this call creates it.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: messageID, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: before_seq, schema: { type: integer, format: int64 } }
+        - { in: query, name: limit, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200":
+          description: The thread and a page of its comments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          thread:
+                            type: object
+                            properties:
+                              post_message_id: { type: string, format: uuid }
+                              discussion_chat_id: { type: string, format: uuid }
+                              root_message_id: { type: string, format: uuid }
+                              comment_count: { type: integer }
+                          comments:
+                            type: array
+                            items: { $ref: "#/components/schemas/Message" }
+        "403": { description: Comments are switched off, or the channel is not readable }
+        "404": { description: No discussion group, or no such post }
+    post:
+      tags: [Groups and channels]
+      summary: Comment on a channel post
+      description: >
+        A reader who is not yet in the discussion group is joined by
+        commenting. The comment itself goes through the ordinary send path, so
+        it is subject to the group's permissions, slow mode and rate limits.
+      parameters:
+        - { $ref: "#/components/parameters/ChatID" }
+        - { in: path, name: messageID, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_message_id]
+              properties:
+                client_message_id: { type: string, format: uuid }
+                type: { type: string, default: text }
+                content: { type: string }
+                entities: { type: array, items: { type: object, additionalProperties: true } }
+                attachments: { type: array, items: { type: object, additionalProperties: true } }
+      responses:
+        "201":
+          description: The comment, as a message in the discussion group
+        "403": { description: Comments are switched off, or posting is not permitted }
+        "404": { description: No discussion group, or no such post }
+
   /api/v1/chats/{chatID}/statistics:
     get:
       tags: [Groups and channels]
@@ -5354,6 +5457,46 @@ components:
             not apply to owners, admins or moderators — applying it to them
             would let one switch lock the staff out of moderating the chat they
             had just restricted.
+        signature_enabled:
+          type: boolean
+          description: |
+            Channels only. Puts the posting admin's name on each post. The name
+            is copied onto the message as it is sent, so switching this on is
+            not retroactive and a later rename never rewrites an old
+            attribution.
+        comments_enabled:
+          type: boolean
+          description: |
+            Channels only. Whether readers may comment, which only does
+            anything once a discussion group is linked.
+        discussion_chat_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Channels only, read-only. The group carrying the comments. Set it
+            through POST /chats/{chatID}/discussion, which needs authority over
+            both chats.
+        sticker_set:
+          type: string
+          description: |
+            Groups only. The slug of the group's own sticker set, offered to
+            members in the composer. An empty string clears it; anything else
+            has to name a set that exists.
+        linked_channel_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Groups only, read-only. The channel this group carries comments for.
+        is_broadcast:
+          type: boolean
+          description: |
+            Groups only. Makes the group read like a channel — staff post,
+            everyone else listens — unless a member is granted a voice
+            personally.
+        is_forum:
+          type: boolean
+          description: Groups only, read-only. Whether the group files its messages under topics.
 
     InviteLink:
       type: object

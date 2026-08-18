@@ -78,7 +78,7 @@ func TestAKeyboardIsStoredWithTheMessage(t *testing.T) {
 
 	// And it survives a read, or a client that reconnects loses the buttons on
 	// a message it already had.
-	history, err := messaging.NewRepository(h.db).History(ctx, h.chatID, h.user, nil, nil, 10)
+	history, err := messaging.NewRepository(h.db).History(ctx, messaging.HistoryQuery{ChatID: h.chatID, ViewerID: h.user, Limit: 10})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}

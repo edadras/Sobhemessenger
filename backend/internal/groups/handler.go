@@ -1,6 +1,7 @@
 package groups
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/sobh/messenger/backend/internal/httpx"
+	"github.com/sobh/messenger/backend/internal/messaging"
 )
 
 // Handler exposes /api/v1/groups, /api/v1/channels and the shared chat
@@ -53,6 +55,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 	r.Post("/{chatID}/messages/{messageID}/view", h.recordView)
 	r.Get("/{chatID}/statistics", h.statistics)
+
+	r.Post("/{chatID}/discussion", h.linkDiscussion)
+	r.Delete("/{chatID}/discussion", h.unlinkDiscussion)
+	r.Get("/{chatID}/messages/{messageID}/comments", h.comments)
+	r.Post("/{chatID}/messages/{messageID}/comments", h.comment)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -512,4 +519,123 @@ func queryInt(r *http.Request, name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+// ------------------------------------------------- discussion and comments
+
+func (h *Handler) linkDiscussion(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		GroupChatID uuid.UUID `json:"group_chat_id"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if body.GroupChatID == uuid.Nil {
+		httpx.Fail(w, r, httpx.Validation("A discussion group is required").
+			WithField("group_chat_id", "required"))
+		return
+	}
+
+	if err := h.service.LinkDiscussion(r.Context(), chatID, body.GroupChatID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"channel_chat_id": chatID, "discussion_chat_id": body.GroupChatID,
+	})
+}
+
+func (h *Handler) unlinkDiscussion(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.UnlinkDiscussion(r.Context(), chatID, principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) comments(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, err := pathUUID(r, "messageID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var beforeSeq *int64
+	if raw := r.URL.Query().Get("before_seq"); raw != "" {
+		value, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil {
+			httpx.Fail(w, r, httpx.BadRequest("before_seq must be an integer"))
+			return
+		}
+		beforeSeq = &value
+	}
+
+	thread, comments, err := h.service.Comments(r.Context(), chatID, messageID,
+		principal.UserID, beforeSeq, queryInt(r, "limit", 50))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"thread": thread, "comments": comments,
+	})
+}
+
+func (h *Handler) comment(w http.ResponseWriter, r *http.Request) {
+	principal, chatID, err := h.chatContext(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	messageID, err := pathUUID(r, "messageID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		ClientMessageID uuid.UUID              `json:"client_message_id"`
+		Type            string                 `json:"type"`
+		Content         string                 `json:"content"`
+		Entities        json.RawMessage        `json:"entities,omitempty"`
+		Attachments     []messaging.Attachment `json:"attachments,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if body.Type == "" {
+		body.Type = messaging.TypeText
+	}
+
+	comment, err := h.service.Comment(r.Context(), chatID, messageID, principal.UserID,
+		messaging.SendInput{
+			ClientMessageID: body.ClientMessageID,
+			Type:            body.Type,
+			Content:         body.Content,
+			Entities:        body.Entities,
+			Attachments:     body.Attachments,
+		})
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusCreated, map[string]any{"message": comment})
 }

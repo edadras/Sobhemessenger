@@ -52,6 +52,8 @@ type ChatContext struct {
 	AutoDelete  int
 	IsMember    bool
 	MutedUntil  *time.Time
+	// IsBroadcast marks a group where only staff may post.
+	IsBroadcast bool
 }
 
 func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUID) (*ChatContext, error) {
@@ -62,18 +64,22 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 		slowMode     *int
 		autoDelete   *int
 		chatDefaults []byte
+		isBroadcast  *bool
 	)
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT c.id, c.type, c.member_count, c.last_seq,
 		       m.role, m.permissions, m.muted_until,
-		       s.slow_mode_seconds, s.auto_delete_seconds, s.default_permissions
+		       s.slow_mode_seconds, s.auto_delete_seconds, s.default_permissions,
+		       g.is_broadcast
 		FROM chats c
 		LEFT JOIN chat_members m ON m.chat_id = c.id AND m.user_id = $2 AND m.left_at IS NULL
 		LEFT JOIN chat_settings s ON s.chat_id = c.id
+		LEFT JOIN groups g ON g.chat_id = c.id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`,
 		chatID, userID,
 	).Scan(&result.ChatID, &result.ChatType, &result.MemberCount, &result.LastSeq,
-		&role, &rawPerms, &result.MutedUntil, &slowMode, &autoDelete, &chatDefaults)
+		&role, &rawPerms, &result.MutedUntil, &slowMode, &autoDelete, &chatDefaults,
+		&isBroadcast)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
@@ -95,6 +101,16 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 		permissions := PermissionsForRole(*role, result.ChatType)
 		if *role == RoleMember || *role == RoleRestricted {
 			permissions = applyOverrides(permissions, chatDefaults)
+			// A broadcast group reads like a channel: staff post, everyone
+			// else listens. It sits under the personal overrides so one
+			// member can still be granted a voice.
+			if isBroadcast != nil && *isBroadcast {
+				permissions.SendMessages = false
+				permissions.SendMedia = false
+				permissions.SendFiles = false
+				permissions.SendPolls = false
+				permissions.SendStickers = false
+			}
 		}
 		result.Permissions = applyOverrides(permissions, rawPerms)
 	}
@@ -103,6 +119,9 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 	}
 	if autoDelete != nil {
 		result.AutoDelete = *autoDelete
+	}
+	if isBroadcast != nil {
+		result.IsBroadcast = *isBroadcast
 	}
 	return &result, nil
 }
@@ -314,6 +333,16 @@ type SendParams struct {
 	// ReplyMarkup is a bot's inline keyboard; nil for everything else.
 	ReplyMarkup json.RawMessage
 	IsSilent    bool
+	// AsChat posts on behalf of the chat itself rather than a person, storing
+	// no sender at all. It is how a channel post is mirrored into its
+	// discussion group: naming the admin who wrote it there would leak the
+	// authorship that `signature_enabled` exists to control.
+	//
+	// Such a message has no idempotency key to be checked against — the
+	// partial unique index skips NULL senders — so a caller using it is
+	// responsible for not asking twice. The one caller that does holds a
+	// primary key on the post it is mirroring, which is a stronger guarantee.
+	AsChat bool
 }
 
 // SendResult carries the stored message plus who must be notified.
@@ -335,10 +364,12 @@ type SendResult struct {
 func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error) {
 	// Idempotency fast path: a retried send returns the original message
 	// rather than a second copy (§7).
-	if existing, err := r.messageByClientID(ctx, p.ChatID, p.SenderID, p.ClientMessageID); err == nil {
-		return &SendResult{Message: existing, Duplicate: true}, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		return nil, err
+	if !p.AsChat {
+		if existing, err := r.messageByClientID(ctx, p.ChatID, p.SenderID, p.ClientMessageID); err == nil {
+			return &SendResult{Message: existing, Duplicate: true}, nil
+		} else if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
 	}
 
 	result := &SendResult{EventSeqs: make(map[uuid.UUID]int64)}
@@ -363,20 +394,39 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			INSERT INTO messages (
 				chat_id, seq, sender_id, client_message_id, type, content, entities, payload,
 				reply_to_id, forward_from_chat_id, forward_from_message_id, forward_from_user_id,
-				forward_signature, is_silent, reply_markup
-			) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '[]'::jsonb), COALESCE($8, '{}'::jsonb),
-			          $9, $10, $11, $12, $13, $14, $15)
+				forward_signature, is_silent, reply_markup, author_signature
+			) VALUES ($1, $2, CASE WHEN $16::boolean THEN NULL ELSE $3::uuid END,
+			          $4, $5, $6, COALESCE($7, '[]'::jsonb), COALESCE($8, '{}'::jsonb),
+			          $9, $10, $11, $12, $13, $14, $15,
+			          -- Resolved here rather than in Go so the name is taken
+			          -- inside the same transaction that assigns the sequence:
+			          -- a separate read could catch the admin mid-rename and
+			          -- sign the post with a name that was never theirs.
+			          -- The subquery yields nothing at all unless this is a
+			          -- channel with signatures on and the sender is staff, so
+			          -- an ordinary chat pays one index probe that misses.
+			          COALESCE((
+			              SELECT COALESCE(NULLIF(cm.custom_title, ''),
+			                              NULLIF(p.display_name, ''), u.username, '')
+			              FROM channels ch
+			              JOIN chat_members cm
+			                ON cm.chat_id = ch.chat_id AND cm.user_id = $3
+			              JOIN users u ON u.id = $3
+			              LEFT JOIN user_profiles p ON p.user_id = u.id
+			              WHERE ch.chat_id = $1 AND ch.signature_enabled
+			                AND cm.role IN ('owner', 'admin', 'moderator')
+			          ), ''))
 			RETURNING id, chat_id, seq, sender_id, client_message_id, type, content,
 			          entities, payload, reply_to_id, is_pinned, created_at, edited_at, deleted_at,
-			          reply_markup`,
+			          reply_markup, author_signature`,
 			p.ChatID, seq, p.SenderID, p.ClientMessageID, p.Type, p.Content,
 			nullableJSON(p.Entities), nullableJSON(p.Payload), p.ReplyToID,
 			forwardChat(p.Forward), forwardMessage(p.Forward), forwardUser(p.Forward),
-			forwardSignature(p.Forward), p.IsSilent, nullableJSON(p.ReplyMarkup),
+			forwardSignature(p.Forward), p.IsSilent, nullableJSON(p.ReplyMarkup), p.AsChat,
 		).Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID, &message.ClientMessageID,
 			&message.Type, &message.Content, &message.Entities, &message.Payload, &message.ReplyToID,
 			&message.IsPinned, &message.CreatedAt, &message.EditedAt, &message.DeletedAt,
-			&message.ReplyMarkup)
+			&message.ReplyMarkup, &message.AuthorSignature)
 		if err != nil {
 			return fmt.Errorf("messaging: insert message: %w", err)
 		}
@@ -410,12 +460,15 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 		}
 
 		// The sender's own cursor moves with the message: their device already
-		// has it, so it must never count as unread.
-		if _, err := tx.Exec(ctx, `
-			UPDATE chat_members
-			SET last_read_seq = $3, last_delivered_seq = $3
-			WHERE chat_id = $1 AND user_id = $2`, p.ChatID, p.SenderID, seq); err != nil {
-			return fmt.Errorf("messaging: advance sender cursor: %w", err)
+		// has it, so it must never count as unread. A message posted by the
+		// chat has no sender whose cursor could move.
+		if !p.AsChat {
+			if _, err := tx.Exec(ctx, `
+				UPDATE chat_members
+				SET last_read_seq = $3, last_delivered_seq = $3
+				WHERE chat_id = $1 AND user_id = $2`, p.ChatID, p.SenderID, seq); err != nil {
+				return fmt.Errorf("messaging: advance sender cursor: %w", err)
+			}
 		}
 
 		if memberCount > FanoutThreshold {
@@ -429,8 +482,8 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			SET unread_count = m.unread_count + 1,
 			    mention_count = m.mention_count + CASE
 			        WHEN m.user_id = ANY($3::uuid[]) THEN 1 ELSE 0 END
-			WHERE m.chat_id = $1 AND m.user_id <> $2 AND m.left_at IS NULL`,
-			p.ChatID, p.SenderID, p.MentionUserIDs); err != nil {
+			WHERE m.chat_id = $1 AND ($4::boolean OR m.user_id <> $2) AND m.left_at IS NULL`,
+			p.ChatID, p.SenderID, p.MentionUserIDs, p.AsChat); err != nil {
 			return fmt.Errorf("messaging: bump unread counts: %w", err)
 		}
 
@@ -554,13 +607,33 @@ func (r *Repository) messageByClientID(ctx context.Context, chatID, senderID, cl
 // ---------------------------------------------------------------- history
 
 // History returns messages in a chat, newest first, seeking by sequence.
-func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, beforeSeq, afterSeq *int64, limit int) ([]Message, error) {
+// HistoryQuery narrows a page of a chat's history.
+//
+// It is a struct rather than a growing parameter list because the same query
+// now serves three readers with different filters — the conversation itself,
+// one forum topic within it, and the comment thread under a channel post —
+// and a fourth positional *int64 would have been unreadable at every call
+// site.
+type HistoryQuery struct {
+	ChatID    uuid.UUID
+	ViewerID  uuid.UUID
+	BeforeSeq *int64
+	AfterSeq  *int64
+	Limit     int
+	// ReplyToID narrows to the direct replies to one message, which is what a
+	// comment thread under a mirrored channel post is.
+	ReplyToID *uuid.UUID
+	// TopicID narrows to one forum topic.
+	TopicID *uuid.UUID
+}
+
+func (r *Repository) History(ctx context.Context, q HistoryQuery) ([]Message, error) {
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT m.id, m.chat_id, m.seq, m.sender_id, m.client_message_id, m.type,
 		       CASE WHEN m.deleted_at IS NULL THEN m.content ELSE '' END,
 		       m.entities, m.payload, m.reply_to_id,
 		       m.forward_from_chat_id, m.forward_from_message_id, m.forward_from_user_id,
-		       m.forward_signature, m.is_pinned, m.view_count,
+		       m.forward_signature, m.author_signature, m.is_pinned, m.view_count,
 		       m.created_at, m.edited_at, m.deleted_at, m.reply_markup,
 		       COALESCE((
 		           SELECT jsonb_agg(jsonb_build_object(
@@ -592,8 +665,10 @@ func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, be
 		      SELECT cm.history_cleared_seq FROM chat_members cm
 		      WHERE cm.chat_id = $1 AND cm.user_id = $2
 		  ), 0)
+		  AND ($6::uuid IS NULL OR m.reply_to_id = $6)
+		  AND ($7::uuid IS NULL OR m.topic_id = $7)
 		ORDER BY m.seq DESC
-		LIMIT $5`, chatID, viewerID, beforeSeq, afterSeq, limit)
+		LIMIT $5`, q.ChatID, q.ViewerID, q.BeforeSeq, q.AfterSeq, q.Limit, q.ReplyToID, q.TopicID)
 	if err != nil {
 		return nil, fmt.Errorf("messaging: history: %w", err)
 	}
@@ -613,7 +688,7 @@ func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, be
 		if err := rows.Scan(&message.ID, &message.ChatID, &message.Seq, &message.SenderID,
 			&message.ClientMessageID, &message.Type, &message.Content, &message.Entities,
 			&message.Payload, &message.ReplyToID, &forwardChatID, &forwardMsgID, &forwardUserID,
-			&forwardSig, &message.IsPinned, &message.ViewCount,
+			&forwardSig, &message.AuthorSignature, &message.IsPinned, &message.ViewCount,
 			&message.CreatedAt, &message.EditedAt, &message.DeletedAt,
 			&message.ReplyMarkup, &rawAttach, &rawReactions); err != nil {
 			return nil, err

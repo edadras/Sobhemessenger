@@ -217,7 +217,11 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	}
 
 	groupsService := groups.NewService(groups.NewRepository(db), messagingRepo,
-		messageBus, cfg, logger)
+		messagingService, messageBus, cfg, logger)
+	// Channel posts are mirrored into the linked discussion group as they go
+	// out, which is what makes comments possible on a post nobody has opened
+	// yet.
+	messagingService.AddObserver(groupsService)
 
 	communitiesService := communities.NewService(communities.NewRepository(db), groupsService)
 

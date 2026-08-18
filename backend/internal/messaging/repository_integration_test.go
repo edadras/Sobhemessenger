@@ -457,7 +457,7 @@ func TestDeleteLeavesATombstone(t *testing.T) {
 	}
 
 	// The row survives so the sequence stays contiguous, but the body is gone.
-	messages, err := repo.History(ctx, chatID, bob, nil, nil, 10)
+	messages, err := repo.History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: bob, Limit: 10})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestHistoryPagesBackwardsBySequence(t *testing.T) {
 		}
 	}
 
-	first, err := repo.History(ctx, chatID, bob, nil, nil, 4)
+	first, err := repo.History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: bob, Limit: 4})
 	if err != nil {
 		t.Fatalf("History page 1: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestHistoryPagesBackwardsBySequence(t *testing.T) {
 	}
 
 	cursor := first[len(first)-1].Seq
-	second, err := repo.History(ctx, chatID, bob, &cursor, nil, 4)
+	second, err := repo.History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: bob, BeforeSeq: &cursor, Limit: 4})
 	if err != nil {
 		t.Fatalf("History page 2: %v", err)
 	}

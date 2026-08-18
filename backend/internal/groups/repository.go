@@ -79,7 +79,43 @@ type Settings struct {
 	// applying it to them would let one switch lock the admins out of
 	// moderating the chat they had just restricted.
 	DefaultPermissions map[string]bool `json:"default_permissions,omitempty"`
+
+	// The fields below belong to one chat type each and live in that type's
+	// extension row, not in chat_settings. They are pointers so that a PUT
+	// which omits them leaves them alone: the settings endpoint replaces the
+	// whole object, and an older client that has never heard of signatures
+	// must not switch them off by not mentioning them.
+	//
+	// On read they are populated only for the type they belong to, so a group
+	// never reports a signature setting and a channel never reports a sticker
+	// set.
+
+	// SignatureEnabled puts the posting admin's name on a channel post.
+	SignatureEnabled *bool `json:"signature_enabled,omitempty"`
+	// CommentsEnabled allows readers to comment on channel posts, which only
+	// does anything once a discussion group is linked.
+	CommentsEnabled *bool `json:"comments_enabled,omitempty"`
+	// DiscussionChatID is the group carrying those comments. Read-only here:
+	// linking touches two chats and needs authority over both, so it has its
+	// own endpoints.
+	DiscussionChatID *uuid.UUID `json:"discussion_chat_id,omitempty"`
+	// StickerSet is the group's own sticker set, offered to its members in
+	// the composer. The slug of a set that exists, or an empty string.
+	StickerSet *string `json:"sticker_set,omitempty"`
+	// LinkedChannelID is the channel this group carries comments for, the
+	// mirror image of DiscussionChatID and equally read-only.
+	LinkedChannelID *uuid.UUID `json:"linked_channel_id,omitempty"`
+	// IsForum reports whether the group files its messages under topics.
+	// Read-only: switching it on creates the General topic, so it has its own
+	// endpoint too.
+	IsForum *bool `json:"is_forum,omitempty"`
+	// IsBroadcast makes a group read like a channel: staff post, everyone
+	// else listens, unless a member is granted a voice personally.
+	IsBroadcast *bool `json:"is_broadcast,omitempty"`
 }
+
+// ErrStickerSetNotFound is a sticker set slug that names nothing.
+var ErrStickerSetNotFound = errors.New("groups: sticker set not found")
 
 type Repository struct {
 	db *database.DB
@@ -329,19 +365,65 @@ func (r *Repository) UpdateChat(ctx context.Context, chatID uuid.UUID, title, de
 }
 
 func (r *Repository) UpdateSettings(ctx context.Context, chatID uuid.UUID, s Settings) error {
-	_, err := r.db.Pool.Exec(ctx, `
-		UPDATE chat_settings
-		SET slow_mode_seconds = $2, history_visible_to_new = $3,
-		    join_requires_approval = $4, max_members = $5,
-		    auto_delete_seconds = $6, default_permissions = $7, updated_at = now()
-		WHERE chat_id = $1`,
-		chatID, s.SlowModeSeconds, s.HistoryVisibleToNew,
-		s.JoinRequiresApproval, s.MaxMembers, s.AutoDeleteSeconds,
-		defaultPermissionsJSON(s.DefaultPermissions))
-	if err != nil {
-		return fmt.Errorf("groups: update settings: %w", err)
-	}
-	return nil
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE chat_settings
+			SET slow_mode_seconds = $2, history_visible_to_new = $3,
+			    join_requires_approval = $4, max_members = $5,
+			    auto_delete_seconds = $6, default_permissions = $7, updated_at = now()
+			WHERE chat_id = $1`,
+			chatID, s.SlowModeSeconds, s.HistoryVisibleToNew,
+			s.JoinRequiresApproval, s.MaxMembers, s.AutoDeleteSeconds,
+			defaultPermissionsJSON(s.DefaultPermissions)); err != nil {
+			return fmt.Errorf("groups: update settings: %w", err)
+		}
+
+		// COALESCE is what makes an omitted field mean "leave it": the
+		// statement runs either way, and a NULL parameter writes back the
+		// value already there. It also makes the statement a no-op against
+		// the wrong chat type, whose extension row simply does not exist.
+		if s.SignatureEnabled != nil || s.CommentsEnabled != nil {
+			if _, err := tx.Exec(ctx, `
+				UPDATE channels
+				SET signature_enabled = COALESCE($2, signature_enabled),
+				    comments_enabled = COALESCE($3, comments_enabled)
+				WHERE chat_id = $1`,
+				chatID, s.SignatureEnabled, s.CommentsEnabled); err != nil {
+				return fmt.Errorf("groups: update channel settings: %w", err)
+			}
+		}
+
+		if s.IsBroadcast != nil {
+			if _, err := tx.Exec(ctx,
+				`UPDATE groups SET is_broadcast = $2 WHERE chat_id = $1`,
+				chatID, *s.IsBroadcast); err != nil {
+				return fmt.Errorf("groups: update broadcast mode: %w", err)
+			}
+		}
+
+		if s.StickerSet != nil {
+			// An empty string clears the set; anything else has to name one
+			// that exists, or members would be offered stickers that cannot
+			// be fetched.
+			if *s.StickerSet != "" {
+				var exists bool
+				if err := tx.QueryRow(ctx,
+					`SELECT EXISTS (SELECT 1 FROM sticker_sets WHERE slug = $1 AND deleted_at IS NULL)`,
+					*s.StickerSet).Scan(&exists); err != nil {
+					return fmt.Errorf("groups: look up sticker set: %w", err)
+				}
+				if !exists {
+					return ErrStickerSetNotFound
+				}
+			}
+			if _, err := tx.Exec(ctx,
+				`UPDATE groups SET sticker_set = $2 WHERE chat_id = $1`,
+				chatID, *s.StickerSet); err != nil {
+				return fmt.Errorf("groups: update sticker set: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // defaultPermissionsJSON renders the map for storage. An empty or absent map
@@ -362,11 +444,18 @@ func (r *Repository) Settings(ctx context.Context, chatID uuid.UUID) (*Settings,
 	s := &Settings{}
 	var rawDefaults []byte
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT slow_mode_seconds, history_visible_to_new, join_requires_approval,
-		       max_members, auto_delete_seconds, default_permissions
-		FROM chat_settings WHERE chat_id = $1`, chatID,
+		SELECT s.slow_mode_seconds, s.history_visible_to_new, s.join_requires_approval,
+		       s.max_members, s.auto_delete_seconds, s.default_permissions,
+		       ch.signature_enabled, ch.comments_enabled, ch.discussion_chat_id,
+		       g.sticker_set, g.linked_channel_id, g.is_forum, g.is_broadcast
+		FROM chat_settings s
+		LEFT JOIN channels ch ON ch.chat_id = s.chat_id
+		LEFT JOIN groups g ON g.chat_id = s.chat_id
+		WHERE s.chat_id = $1`, chatID,
 	).Scan(&s.SlowModeSeconds, &s.HistoryVisibleToNew, &s.JoinRequiresApproval,
-		&s.MaxMembers, &s.AutoDeleteSeconds, &rawDefaults)
+		&s.MaxMembers, &s.AutoDeleteSeconds, &rawDefaults,
+		&s.SignatureEnabled, &s.CommentsEnabled, &s.DiscussionChatID,
+		&s.StickerSet, &s.LinkedChannelID, &s.IsForum, &s.IsBroadcast)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}

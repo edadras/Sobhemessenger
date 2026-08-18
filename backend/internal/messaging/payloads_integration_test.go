@@ -336,7 +336,7 @@ func TestStoppingALiveLocationIsFinal(t *testing.T) {
 
 	// The message survives as the record that a location was shared, with its
 	// last point still readable.
-	history, err := messaging.NewRepository(db).History(ctx, chatID, author, nil, nil, 10)
+	history, err := messaging.NewRepository(db).History(ctx, messaging.HistoryQuery{ChatID: chatID, ViewerID: author, Limit: 10})
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
