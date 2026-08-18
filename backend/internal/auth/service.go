@@ -31,6 +31,13 @@ type Service struct {
 	smsCfg  config.SMS
 	metrics *observability.Metrics
 	logger  *slog.Logger
+
+	// email is optional; see SetEmailSender. Account recovery by email is a
+	// feature a deployment may not have a transport for, and the service
+	// refuses to enrol an address rather than accepting one it could never
+	// send to.
+	email     EmailSender
+	emailEcho bool
 }
 
 func NewService(

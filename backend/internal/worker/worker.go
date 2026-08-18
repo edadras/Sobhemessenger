@@ -217,6 +217,7 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 		run  func(context.Context) (int64, error)
 	}{
 		{"expired_otp_challenges", r.pruneOTPChallenges},
+		{"expired_email_challenges", r.pruneEmailChallenges},
 		{"consumed_sync_events", r.pruneSyncEvents},
 		{"expired_stories", r.expireStories},
 		{"auto_deleted_messages", r.autoDeleteMessages},
@@ -240,6 +241,18 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 				slog.String("task", task.name), slog.Int64("rows", affected))
 		}
 	}
+}
+
+// pruneEmailChallenges clears spent recovery codes. They are hashed, but a
+// hash of a six-digit code is not much of a secret, and a row nobody can use
+// is not worth keeping.
+func (r *Runner) pruneEmailChallenges(ctx context.Context) (int64, error) {
+	tag, err := r.db.Pool.Exec(ctx,
+		`DELETE FROM email_challenges WHERE expires_at < now() - interval '24 hours'`)
+	if err != nil {
+		return 0, fmt.Errorf("worker: prune email challenges: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *Runner) pruneOTPChallenges(ctx context.Context) (int64, error) {

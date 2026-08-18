@@ -173,8 +173,14 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	}
 
 	authRepo := auth.NewRepository(db)
+	emailSender, err := auth.NewEmailSender(cfg.Email, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	authService := auth.NewService(authRepo, tokens, limiter, rules, smsSender,
 		cacheClient, cfg.Auth, cfg.SMS, metrics, logger)
+	authService.SetEmailSender(emailSender, cfg.Email.EchoCodes)
 	authMiddleware := auth.NewMiddleware(tokens, authRepo, cacheClient, logger)
 
 	flags := featureflags.NewService(db, cacheClient, logger)

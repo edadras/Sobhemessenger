@@ -32,6 +32,10 @@ func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handl
 	// Refresh authenticates with the refresh token in the body, not a bearer
 	// token, precisely because the access token has usually expired by then.
 	r.Post("/refresh", h.refresh)
+	// Recovery cannot require a session either: the whole point is that the
+	// owner is locked out.
+	r.Post("/recovery/email/start", h.startEmailRecovery)
+	r.Post("/recovery/email/complete", h.completeEmailRecovery)
 
 	r.Group(func(private chi.Router) {
 		private.Use(requireAuth)
@@ -42,6 +46,10 @@ func (h *Handler) Routes(requireAuth func(http.Handler) http.Handler) http.Handl
 		private.Get("/devices", h.listDevices)
 		private.Get("/login-history", h.loginHistory)
 		private.Put("/two-step", h.setTwoStep)
+		private.Get("/recovery/email", h.recoveryEmail)
+		private.Put("/recovery/email", h.setRecoveryEmail)
+		private.Post("/recovery/email/verify", h.verifyRecoveryEmail)
+		private.Delete("/recovery/email", h.removeRecoveryEmail)
 	})
 	return r
 }
@@ -274,4 +282,130 @@ func (h *Handler) setTwoStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, r, http.StatusOK, map[string]any{"two_step_enabled": body.NewPassword != ""})
+}
+
+// ------------------------------------------------------- email recovery
+
+func (h *Handler) recoveryEmail(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	status, err := h.service.EmailStatus(r.Context(), principal.UserID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, status)
+}
+
+func (h *Handler) setRecoveryEmail(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	code, err := h.service.SetRecoveryEmail(r.Context(), principal.UserID, body.Email)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	response := map[string]any{"verification_sent": true}
+	// Only ever populated when the deployment has explicitly asked for it in
+	// development; see EMAIL_ECHO_CODES.
+	if code != "" {
+		response["debug_code"] = code
+	}
+	httpx.JSON(w, r, http.StatusOK, response)
+}
+
+func (h *Handler) verifyRecoveryEmail(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.VerifyRecoveryEmail(r.Context(), principal.UserID, body.Code); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"verified": true})
+}
+
+func (h *Handler) removeRecoveryEmail(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if err := h.service.RemoveRecoveryEmail(r.Context(), principal.UserID); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.NoContent(w, r)
+}
+
+func (h *Handler) startEmailRecovery(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	code, err := h.service.StartEmailRecovery(r.Context(), body.Email)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	// The same answer whether or not the address is on an account: anything
+	// else would make this endpoint a way to test which addresses have SOBH
+	// accounts, one guess at a time.
+	response := map[string]any{"sent": true}
+	if code != "" {
+		response["debug_code"] = code
+	}
+	httpx.JSON(w, r, http.StatusOK, response)
+}
+
+func (h *Handler) completeEmailRecovery(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	if err := h.service.CompleteEmailRecovery(r.Context(), body.Email, body.Code); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	// Nobody is logged in by this: the account is still behind its phone
+	// number and an OTP. What has gone is the forgotten second factor, and
+	// every session that existed before.
+	httpx.JSON(w, r, http.StatusOK, map[string]any{"two_step_reset": true})
 }

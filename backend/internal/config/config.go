@@ -37,6 +37,7 @@ type Config struct {
 	Search     Search
 	Auth       Auth
 	SMS        SMS
+	Email      Email
 	Push       Push
 	Media      Media
 	Calls      Calls
@@ -110,6 +111,28 @@ type SMS struct {
 	Sender   string
 	Timeout  time.Duration
 	// Development only: echo the OTP in the API response instead of sending it.
+	EchoCodes bool
+}
+
+// Email is the transport for account-recovery mail (§4).
+//
+// Separate from SMS because it is a different provider with a different
+// failure mode, and because a deployment may well have one and not the other:
+// email recovery is optional, and a server with no mail transport simply
+// refuses to set a recovery address rather than pretending to send.
+type Email struct {
+	Provider string
+	// SMTP settings, used by the "smtp" provider.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	// From is the envelope sender.
+	From     string
+	FromName string
+	Timeout  time.Duration
+	StartTLS bool
+	// Development only: echo the code in the API response instead of sending.
 	EchoCodes bool
 }
 
@@ -245,6 +268,18 @@ func Load() (*Config, error) {
 			Timeout:   getDuration("SMS_TIMEOUT", 10*time.Second),
 			EchoCodes: getBool("SMS_ECHO_CODES", false),
 		},
+		Email: Email{
+			Provider:     getString("EMAIL_PROVIDER", "log"),
+			SMTPHost:     getString("SMTP_HOST", ""),
+			SMTPPort:     getInt("SMTP_PORT", 587),
+			SMTPUsername: getString("SMTP_USERNAME", ""),
+			SMTPPassword: getString("SMTP_PASSWORD", ""),
+			From:         getString("EMAIL_FROM", ""),
+			FromName:     getString("EMAIL_FROM_NAME", "SOBH"),
+			Timeout:      getDuration("EMAIL_TIMEOUT", 15*time.Second),
+			StartTLS:     getBool("SMTP_STARTTLS", true),
+			EchoCodes:    getBool("EMAIL_ECHO_CODES", false),
+		},
 		Push: Push{
 			FCMEndpoint:     getString("FCM_ENDPOINT", "https://fcm.googleapis.com/v1"),
 			FCMCredentials:  getString("FCM_CREDENTIALS_JSON", ""),
@@ -333,6 +368,15 @@ func (c *Config) validate() error {
 		}
 		if c.SMS.Provider == "log" {
 			problems = append(problems, "SMS_PROVIDER must be a real provider in production")
+		}
+		if c.Email.EchoCodes {
+			problems = append(problems, "EMAIL_ECHO_CODES must be false in production")
+		}
+		// Email recovery is optional, so "log" is allowed in production and
+		// simply means the feature is off. What is not allowed is a mail
+		// transport configured with nowhere to send from.
+		if c.Email.Provider == "smtp" && (c.Email.SMTPHost == "" || c.Email.From == "") {
+			problems = append(problems, "SMTP_HOST and EMAIL_FROM are required when EMAIL_PROVIDER is smtp")
 		}
 		if c.Storage.AccessKey == "" || c.Storage.SecretKey == "" {
 			problems = append(problems, "MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required in production")

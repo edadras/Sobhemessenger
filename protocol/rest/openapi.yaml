@@ -305,6 +305,125 @@ paths:
       responses:
         "200": { description: Login history }
 
+  /api/v1/auth/recovery/email:
+    get:
+      tags: [Authentication]
+      summary: The recovery address on this account
+      description: >
+        The address is masked. `available` reports whether this deployment can
+        send mail at all — a server with no transport refuses to enrol an
+        address rather than accepting one it could never send to.
+      responses:
+        "200":
+          description: The address, whether it has been proved, and whether the feature exists here
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          email: { type: string, description: Masked, e.g. a***a@example.com }
+                          verified: { type: boolean }
+                          verified_at: { type: string, format: date-time, nullable: true }
+                          available: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Authentication]
+      summary: Enrol a recovery address
+      description: >
+        Stores the address unproved and sends it a code. It does not become the
+        recovery address until the code is presented — an unverified address is
+        worse than none, because it is a second way into the account that the
+        owner never confirmed. Setting a new address revokes whatever the old
+        one could do.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "200": { description: A code has been sent to the address }
+        "429": { description: One was sent moments ago; wait before asking again }
+        "503": { description: This server has no mail transport }
+    delete:
+      tags: [Authentication]
+      summary: Remove the recovery address
+      responses:
+        "200": { description: Removed, along with anything it could do }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/recovery/email/verify:
+    post:
+      tags: [Authentication]
+      summary: Prove the recovery address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "200": { description: Verified; the address is now a recovery address }
+        "401": { description: Wrong, expired, or too many attempts }
+        "409": { description: The address on the account changed while the code was outstanding }
+
+  /api/v1/auth/recovery/email/start:
+    post:
+      tags: [Authentication]
+      summary: Begin recovery from a locked-out account
+      description: >
+        Sends a code to a verified recovery address. The response is identical
+        whether or not the address is on an account: anything else would make
+        this a way to test which addresses have SOBH accounts, one guess at a
+        time. Unauthenticated, because the point is that the owner is locked
+        out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        "200": { description: If that address is on an account, a code has been sent to it }
+        "503": { description: This server has no mail transport }
+
+  /api/v1/auth/recovery/email/complete:
+    post:
+      tags: [Authentication]
+      summary: Clear a forgotten two-step password
+      description: >
+        Removes the second factor for whoever holds the code sent to the
+        recovery address, and revokes every existing session with it, so a
+        reset prompted by an intruder does not leave that intruder signed in.
+        Nobody is logged in by this call: the account is still behind its phone
+        number and an OTP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string }
+                code: { type: string }
+      responses:
+        "200": { description: The two-step password is gone and all sessions are revoked }
+        "401": { description: Wrong, expired, or too many attempts }
+
   /api/v1/auth/two-step:
     put:
       tags: [Authentication]

@@ -170,11 +170,16 @@ func (r *Repository) TouchUserLastSeen(ctx context.Context, userID uuid.UUID) er
 // SetTwoStepPassword stores the Argon2id hash and bumps token_version so every
 // token issued before the change stops working (§57).
 func (r *Repository) SetTwoStepPassword(ctx context.Context, userID uuid.UUID, hash, hint *string) error {
+	// $2 is cast explicitly because it appears once as a value assigned to a
+	// text column and once inside `IS NOT NULL`, which carries no type of its
+	// own. Without the cast PostgreSQL cannot determine the parameter's type
+	// and refuses to prepare the statement — so setting a two-step password
+	// failed with a 500 rather than working.
 	_, err := r.db.Pool.Exec(ctx, `
 		UPDATE users
-		SET password_hash = $2,
-		    two_step_hint = $3,
-		    two_step_enabled = ($2 IS NOT NULL),
+		SET password_hash = $2::text,
+		    two_step_hint = $3::text,
+		    two_step_enabled = ($2::text IS NOT NULL),
 		    token_version = token_version + 1,
 		    updated_at = now()
 		WHERE id = $1`, userID, hash, hint)
