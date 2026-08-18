@@ -239,10 +239,9 @@ func (r *Repository) ensureSelfChat(ctx context.Context, userID uuid.UUID) (uuid
 	return chatID, true, err
 }
 
-// ListChats returns the caller's chat list, most recently active first.
 // ChatListQuery narrows the chat list.
 //
-// FolderID is a struct field rather than a fourth positional argument because
+// FolderID is a field rather than a fourth positional argument because
 // the folder filter is the sort of thing that grows — and a call site reading
 // `ListChats(ctx, id, 50, nil, nil)` says nothing about which nil is which.
 type ChatListQuery struct {
@@ -254,6 +253,7 @@ type ChatListQuery struct {
 	FolderID *uuid.UUID
 }
 
+// ListChats returns the caller's chat list, most recently active first.
 func (r *Repository) ListChats(ctx context.Context, q ChatListQuery) ([]Chat, error) {
 	// The LATERAL resolves the other person in a one-to-one chat. Such a chat
 	// has no title of its own, so without this every private and secret
@@ -431,6 +431,11 @@ func (r *Repository) Send(ctx context.Context, p SendParams) (*SendResult, error
 			          -- The subquery yields nothing at all unless this is a
 			          -- channel with signatures on and the sender is staff, so
 			          -- an ordinary chat pays one index probe that misses.
+			          --
+			          -- An admin with no custom title, no display name and no
+			          -- username signs with nothing. That is the honest
+			          -- answer: there is no name to sign with, and reaching
+			          -- for the phone number to fill the gap would publish it.
 			          COALESCE((
 			              SELECT COALESCE(NULLIF(cm.custom_title, ''),
 			                              NULLIF(p.display_name, ''), u.username, '')
@@ -651,10 +656,9 @@ func (r *Repository) messageByClientID(ctx context.Context, chatID, senderID, cl
 
 // ---------------------------------------------------------------- history
 
-// History returns messages in a chat, newest first, seeking by sequence.
 // HistoryQuery narrows a page of a chat's history.
 //
-// It is a struct rather than a growing parameter list because the same query
+// It is a struct rather than a growing parameter list, because the same query
 // now serves three readers with different filters — the conversation itself,
 // one forum topic within it, and the comment thread under a channel post —
 // and a fourth positional *int64 would have been unreadable at every call
@@ -672,6 +676,7 @@ type HistoryQuery struct {
 	TopicID *uuid.UUID
 }
 
+// History returns messages in a chat, newest first, seeking by sequence.
 func (r *Repository) History(ctx context.Context, q HistoryQuery) ([]Message, error) {
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT m.id, m.chat_id, m.seq, m.sender_id, m.client_message_id, m.type,

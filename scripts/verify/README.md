@@ -15,6 +15,7 @@ dependencies up, and `SMS_ECHO_CODES=true` so the probes can sign in.
 | `realtime.py` | Does a message actually arrive? Two people, two sockets: delivery and its latency against the §79 budget, typing, read receipts, reactions, edits and deletions, catching up after being offline, and that a non-member's socket receives nothing. |
 | `bot_api_and_media.py` | Can a bot hold a conversation with its own token — authenticate, receive a command as an update, reply, attach an inline keyboard — and does an upload session open? |
 | `worker.sh` | Does the worker bind all six job consumers, and does it do real work? Schedules a post, moves its time into the past, and waits for the scheduler to publish it into the conversation. |
+| `new_surfaces.py` | Do the nine features that had no code work through the API the app calls? Clearing history one side at a time, channel signatures and comments, the discussion-group link, the group sticker set and broadcast mode, contact requests, email recovery, chat folders and forum topics — 65 checks, each a claim about behaviour rather than a status code. |
 
 ## Why these exist
 
@@ -31,6 +32,22 @@ rejected with a validation error.
 own messages: `appendUserEvents` excluded the actor, so a second device learned
 nothing from `/sync` — the app's whole multi-device catch-up path — and could
 only find the message by refetching the conversation.
+
+`new_surfaces.py` found two things about its own fixtures rather than the
+server, and both are worth recording because the first kind of failure looks
+exactly like the second. Groups and channels are created through `POST /chats`,
+not `POST /groups`; the probe's first version got `None` back and then compared
+two absent values in several checks, which *passed*. Fixtures now stop the run
+when they come back empty. And a channel post from an account with no display
+name, no username and no custom title is signed with nothing — correctly, since
+there is no name to sign with and the phone number is not a substitute — so the
+probe sets a display name first, and a test now pins the nameless case.
+
+`worker.sh` was passing on evidence from an earlier run: it signed in with two
+fixed phone numbers, so every run shared one conversation, and a post published
+minutes earlier satisfied the search before this run's post had gone anywhere.
+Fresh numbers and a nonce in the body fixed it — the check now fails when the
+scheduler does nothing, which is what it was for.
 
 ## A note on 4xx
 

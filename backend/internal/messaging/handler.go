@@ -499,14 +499,14 @@ type folderBody struct {
 	ExcludeArchived    bool   `json:"exclude_archived,omitempty"`
 }
 
+// input converts the wire body to the service's input.
+//
+// The two shapes are identical field for field, which is deliberate rather
+// than accidental: keeping the JSON contract in the handler means renaming a
+// field on the wire cannot silently rename one in the service, and the
+// conversion is the one place that would fail to compile if they diverged.
 func (b folderBody) input() FolderInput {
-	return FolderInput{
-		Title: b.Title, Emoji: b.Emoji, Position: b.Position,
-		IncludeContacts: b.IncludeContacts, IncludeNonContacts: b.IncludeNonContacts,
-		IncludeGroups: b.IncludeGroups, IncludeChannels: b.IncludeChannels,
-		IncludeBots: b.IncludeBots, ExcludeMuted: b.ExcludeMuted,
-		ExcludeRead: b.ExcludeRead, ExcludeArchived: b.ExcludeArchived,
-	}
+	return FolderInput(b)
 }
 
 func (h *Handler) folders(w http.ResponseWriter, r *http.Request) {

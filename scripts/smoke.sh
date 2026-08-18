@@ -44,12 +44,19 @@ signin() { # phone -> echoes access token
 echo "=== auth ==="
 # A phone of its own: asking twice for the same number inside the resend
 # window is correctly refused, and reusing one here would break sign-in below.
-req POST /auth/otp/request "" '{"phone":"+989120000009"}'
+OTP_PHONE="+98912$(python3 -c "import secrets;print(''.join(secrets.choice('0123456789') for _ in range(7)))")"
+req POST /auth/otp/request "" "{\"phone\":\"$OTP_PHONE\"}"
 check "request an OTP" 200 "$STATUS" "$BODY"
 echo "     otp response: $(echo "$BODY" | head -c 200)"
 
-A=$(signin "+989120000001")
-B=$(signin "+989120000002")
+# Fresh numbers each run. Fixed ones meant every run reused the same two
+# accounts, so state left behind by an earlier run — a secret chat that already
+# existed, a bot username already claimed — made checks fail for reasons that
+# had nothing to do with the code under test.
+NONCE=$(python3 -c "import secrets;print(''.join(secrets.choice('0123456789') for _ in range(7)))")
+A=$(signin "+98912$NONCE")
+NONCE=$(python3 -c "import secrets;print(''.join(secrets.choice('0123456789') for _ in range(7)))")
+B=$(signin "+98912$NONCE")
 if [ -n "$A" ] && [ -n "$B" ]; then PASS=$((PASS+1)); echo "  ok   two users signed in"
 else FAIL=$((FAIL+1)); echo "  FAIL sign-in produced no token"; PROBLEMS+=("sign-in produced no token :: $BODY"); fi
 
@@ -185,7 +192,8 @@ req GET "/chats/$GROUP/scheduled" "$A" ""
 check "list scheduled" 200 "$STATUS" "$BODY"
 
 echo "=== bots ==="
-req POST /bots "$A" '{"username":"smoketest_bot","display_name":"Smoke"}'
+BOT_NAME="smoke$(python3 -c "import secrets;print(secrets.token_hex(3))")_bot"
+req POST /bots "$A" "{\"username\":\"$BOT_NAME\",\"display_name\":\"Smoke\"}"
 check "register a bot" 201 "$STATUS" "$BODY"
 
 echo "=== contacts, stories, news, notifications ==="

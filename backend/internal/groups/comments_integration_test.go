@@ -250,6 +250,34 @@ func TestACustomTitleIsWhatTheSignatureShows(t *testing.T) {
 	}
 }
 
+func TestAnAdminWithNoNameSignsWithNothing(t *testing.T) {
+	h := newCommentHarness(t)
+	ctx := context.Background()
+
+	owner := createUser(t, h.db, "owner")
+	// A freshly registered account has no display name until the profile
+	// screen sets one, and no username until it claims one. There is then
+	// nothing to sign with, and reaching for the phone number to fill the gap
+	// would publish it — so the post goes out unsigned.
+	if _, err := h.db.Pool.Exec(ctx,
+		`UPDATE user_profiles SET display_name = '' WHERE user_id = $1`, owner); err != nil {
+		t.Fatalf("clear display name: %v", err)
+	}
+	channelID := h.chat(t, messaging.ChatChannel, "Newsroom", owner, false)
+
+	on := true
+	if err := h.repo.UpdateSettings(ctx, channelID, groups.Settings{
+		HistoryVisibleToNew: true, MaxMembers: 200000, SignatureEnabled: &on,
+	}); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+
+	post := h.post(t, channelID, owner, "from a nameless admin")
+	if post.AuthorSignature != "" {
+		t.Errorf("signature = %q; there was no name to sign with", post.AuthorSignature)
+	}
+}
+
 func TestAnOrdinaryMemberNeverSignsAPost(t *testing.T) {
 	h := newCommentHarness(t)
 	ctx := context.Background()

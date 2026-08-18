@@ -25,15 +25,24 @@ sign() {
   curl -s -X POST "$API/auth/otp/verify" -H 'Content-Type: application/json' \
     -d "{\"phone\":\"$1\",\"code\":\"$C\",\"device_name\":\"w\",\"platform\":\"android\",\"app_version\":\"1.0.0\"}"
 }
-A=$(sign "+989230000001"); ATOK=$(echo "$A" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['access_token'])")
-B=$(sign "+989230000002"); BID=$(echo "$B" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['user_id'])")
+# Fresh numbers each run. Reusing fixed ones meant the same two accounts and
+# therefore the same conversation, so a post published by an earlier run
+# satisfied the search below before this run's post had gone anywhere — the
+# check passed while proving nothing.
+SUFFIX=$(python3 -c "import secrets;print(''.join(secrets.choice('0123456789') for _ in range(7)))")
+A=$(sign "+98923$SUFFIX"); ATOK=$(echo "$A" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['access_token'])")
+SUFFIX=$(python3 -c "import secrets;print(''.join(secrets.choice('0123456789') for _ in range(7)))")
+B=$(sign "+98923$SUFFIX"); BID=$(echo "$B" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['user_id'])")
 CHAT=$(curl -s -X POST "$API/chats/private" -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' \
         -d "{\"user_id\":\"$BID\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['chat_id'])")
 
 WHEN=$(python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=5)).isoformat().replace('+00:00','Z'))")
 CM=$(python3 -c "import uuid;print(uuid.uuid4())")
+# The nonce is what makes the wait below prove this run's post arrived rather
+# than finding one from any other.
+NONCE=$(python3 -c "import secrets;print(secrets.token_hex(4))")
 SCHED=$(curl -s -X POST "$API/chats/$CHAT/scheduled" -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' \
-  -d "{\"client_message_id\":\"$CM\",\"type\":\"text\",\"content\":\"از زمان‌بندی آمد\",\"scheduled_at\":\"$WHEN\"}")
+  -d "{\"client_message_id\":\"$CM\",\"type\":\"text\",\"content\":\"از زمان‌بندی آمد $NONCE\",\"scheduled_at\":\"$WHEN\"}")
 SID=$(echo "$SCHED" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])" 2>/dev/null)
 [ -n "$SID" ] && ok "a post was scheduled" || bad "scheduling" "$SCHED"
 
@@ -45,7 +54,7 @@ FOUND=""
 for i in $(seq 1 24); do
   sleep 5
   FOUND=$(curl -s "$API/chats/$CHAT/messages" -H "Authorization: Bearer $ATOK" \
-          | python3 -c "import sys,json;print('yes' if any('زمان‌بندی' in (m.get('content') or '') for m in json.load(sys.stdin)['data']['messages']) else '')" 2>/dev/null)
+          | NONCE="$NONCE" python3 -c "import os,sys,json;print('yes' if any(os.environ['NONCE'] in (m.get('content') or '') for m in json.load(sys.stdin)['data']['messages']) else '')" 2>/dev/null)
   [ -n "$FOUND" ] && break
 done
 [ -n "$FOUND" ] && ok "the worker published the scheduled post into the conversation" \
