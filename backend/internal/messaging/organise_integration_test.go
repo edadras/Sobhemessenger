@@ -124,6 +124,15 @@ func groupChat(t *testing.T, db *database.DB, owner uuid.UUID, members ...uuid.U
 			t.Fatalf("add member: %v", err)
 		}
 	}
+
+	// Production creates this row with the chat, and slow mode, auto-delete and
+	// the chat-wide permissions all live in it. A helper that skipped it made
+	// those settings silently unreachable from tests.
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO chat_settings (chat_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+		chatID); err != nil {
+		t.Fatalf("create chat settings: %v", err)
+	}
 	return chatID
 }
 
@@ -1361,5 +1370,81 @@ func TestOrdinaryGroupMembersStillCannotPin(t *testing.T) {
 
 	if err := service.SetPinned(ctx, sent.ID, bob, true); err == nil {
 		t.Error("an ordinary group member pinned a message, want a refusal")
+	}
+}
+
+func TestAChatWideRestrictionAppliesToMembersButNotStaff(t *testing.T) {
+	// `default_permissions` existed as a column that nothing read, so an admin
+	// had no way to say "nobody may post media here" — the only lever was a
+	// per-member override, one person at a time.
+	//
+	// It must not apply to staff. If it did, one switch would lock the admins
+	// out of moderating the chat they had just restricted.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	owner := createUser(t, db, "owner")
+	member := createUser(t, db, "member")
+	chatID := groupChat(t, db, owner, member)
+
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE chat_settings SET default_permissions = '{"send_media": false}'::jsonb
+		 WHERE chat_id = $1`, chatID); err != nil {
+		t.Fatalf("restrict the chat: %v", err)
+	}
+
+	_, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: member, ClientMessageID: uuid.New(),
+		Type: messaging.TypeImage, Content: "a photo",
+	})
+	if err == nil {
+		t.Error("an ordinary member posted media into a chat that forbids it")
+	}
+
+	// Text is untouched: only the named key changes.
+	if _, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: member, ClientMessageID: uuid.New(),
+		Type: messaging.TypeText, Content: "words are still fine",
+	}); err != nil {
+		t.Errorf("the restriction leaked into an unrelated permission: %v", err)
+	}
+
+	// And the owner is exempt.
+	if _, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: owner, ClientMessageID: uuid.New(),
+		Type: messaging.TypeImage, Content: "the owner's photo",
+	}); err != nil {
+		t.Errorf("the chat-wide restriction locked out the owner: %v", err)
+	}
+}
+
+func TestAPersonalGrantOverridesTheChatWideRestriction(t *testing.T) {
+	// The layers are narrowest last, so one person can be given back something
+	// the chat withholds from everyone else.
+	db := testDB(t)
+	service := newService(t, db)
+	ctx := context.Background()
+
+	owner := createUser(t, db, "owner")
+	member := createUser(t, db, "member")
+	chatID := groupChat(t, db, owner, member)
+
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE chat_settings SET default_permissions = '{"send_media": false}'::jsonb
+		 WHERE chat_id = $1`, chatID); err != nil {
+		t.Fatalf("restrict the chat: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE chat_members SET permissions = '{"send_media": true}'::jsonb
+		 WHERE chat_id = $1 AND user_id = $2`, chatID, member); err != nil {
+		t.Fatalf("grant the exception: %v", err)
+	}
+
+	if _, err := service.Send(ctx, messaging.SendInput{
+		ChatID: chatID, SenderID: member, ClientMessageID: uuid.New(),
+		Type: messaging.TypeImage, Content: "allowed for me",
+	}); err != nil {
+		t.Errorf("a personal grant did not override the chat-wide restriction: %v", err)
 	}
 }

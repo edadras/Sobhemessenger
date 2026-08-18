@@ -67,7 +67,18 @@ type Settings struct {
 	HistoryVisibleToNew  bool `json:"history_visible_to_new"`
 	JoinRequiresApproval bool `json:"join_requires_approval"`
 	MaxMembers           int  `json:"max_members"`
-	AutoDeleteSeconds    int  `json:"auto_delete_seconds"`
+	// AutoDeleteSeconds is a self-destruct timer for the whole chat. Zero
+	// leaves messages alone; anything else is enforced by the worker, which
+	// tombstones a message and clears its content once it is that old.
+	AutoDeleteSeconds int `json:"auto_delete_seconds"`
+	// DefaultPermissions restricts what ordinary members may do, chat-wide.
+	//
+	// Only the keys present are changed, and only downwards in practice: it is
+	// layered under each member's own overrides, so "nobody may post media"
+	// still leaves room to grant one person an exception. Staff are exempt —
+	// applying it to them would let one switch lock the admins out of
+	// moderating the chat they had just restricted.
+	DefaultPermissions map[string]bool `json:"default_permissions,omitempty"`
 }
 
 type Repository struct {
@@ -322,29 +333,48 @@ func (r *Repository) UpdateSettings(ctx context.Context, chatID uuid.UUID, s Set
 		UPDATE chat_settings
 		SET slow_mode_seconds = $2, history_visible_to_new = $3,
 		    join_requires_approval = $4, max_members = $5,
-		    auto_delete_seconds = $6, updated_at = now()
+		    auto_delete_seconds = $6, default_permissions = $7, updated_at = now()
 		WHERE chat_id = $1`,
 		chatID, s.SlowModeSeconds, s.HistoryVisibleToNew,
-		s.JoinRequiresApproval, s.MaxMembers, s.AutoDeleteSeconds)
+		s.JoinRequiresApproval, s.MaxMembers, s.AutoDeleteSeconds,
+		defaultPermissionsJSON(s.DefaultPermissions))
 	if err != nil {
 		return fmt.Errorf("groups: update settings: %w", err)
 	}
 	return nil
 }
 
+// defaultPermissionsJSON renders the map for storage. An empty or absent map
+// is stored as an empty object rather than null, so the column keeps its NOT
+// NULL default and the resolver never has to reason about a missing value.
+func defaultPermissionsJSON(permissions map[string]bool) []byte {
+	if len(permissions) == 0 {
+		return []byte(`{}`)
+	}
+	encoded, err := json.Marshal(permissions)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return encoded
+}
+
 func (r *Repository) Settings(ctx context.Context, chatID uuid.UUID) (*Settings, error) {
 	s := &Settings{}
+	var rawDefaults []byte
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT slow_mode_seconds, history_visible_to_new, join_requires_approval,
-		       max_members, auto_delete_seconds
+		       max_members, auto_delete_seconds, default_permissions
 		FROM chat_settings WHERE chat_id = $1`, chatID,
 	).Scan(&s.SlowModeSeconds, &s.HistoryVisibleToNew, &s.JoinRequiresApproval,
-		&s.MaxMembers, &s.AutoDeleteSeconds)
+		&s.MaxMembers, &s.AutoDeleteSeconds, &rawDefaults)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("groups: read settings: %w", err)
+	}
+	if len(rawDefaults) > 0 {
+		_ = json.Unmarshal(rawDefaults, &s.DefaultPermissions)
 	}
 	return s, nil
 }

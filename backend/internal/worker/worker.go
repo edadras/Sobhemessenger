@@ -138,6 +138,14 @@ func (r *Runner) Stop(ctx context.Context) {
 // does is idempotent, so several workers may run it concurrently.
 const maintenanceInterval = 15 * time.Minute
 
+// autoDeleteBatch bounds how many expired messages one maintenance run clears.
+//
+// A chat with a short timer and a long history could otherwise fill a whole
+// tick by itself and starve every other task. The next tick continues from
+// where this one stopped, so the bound delays the sweep rather than skipping
+// anything.
+const autoDeleteBatch = 5000
+
 // schedulerInterval is how often due messages are published.
 //
 // It is far shorter than the maintenance pass because the delay is visible to
@@ -210,6 +218,7 @@ func (r *Runner) runMaintenance(ctx context.Context) {
 		{"expired_otp_challenges", r.pruneOTPChallenges},
 		{"consumed_sync_events", r.pruneSyncEvents},
 		{"expired_stories", r.expireStories},
+		{"auto_deleted_messages", r.autoDeleteMessages},
 		{"abandoned_uploads", r.expireUploadSessions},
 		{"released_upload_parts", r.reapExpiredUploads},
 		{"stranded_media", r.retryStrandedMedia},
@@ -245,6 +254,45 @@ func (r *Runner) pruneOTPChallenges(ctx context.Context) (int64, error) {
 // offline (§9).
 func (r *Runner) pruneSyncEvents(ctx context.Context) (int64, error) {
 	return r.messaging.PruneEvents(ctx, 7*24*time.Hour)
+}
+
+// autoDeleteMessages enforces a chat's self-destruct timer (§14).
+//
+// `chat_settings.auto_delete_seconds` is a promise: someone turns it on
+// believing that what they say stops existing after that long. Storing the
+// number without ever acting on it is worse than not offering the setting,
+// because it is a privacy guarantee that quietly is not kept.
+//
+// The row is tombstoned rather than removed, exactly as an ordinary deletion
+// is: `seq` has to stay contiguous or every client's cursor arithmetic breaks,
+// and a gap would be a worse lie than a marker. What actually goes is the
+// content — that is the part the promise was about.
+//
+// Bounded per run so one chat with a short timer and a long history cannot
+// monopolise a maintenance tick; the next tick continues where this stopped.
+func (r *Runner) autoDeleteMessages(ctx context.Context) (int64, error) {
+	tag, err := r.db.Pool.Exec(ctx, `
+		UPDATE messages m
+		SET deleted_at = now(), content = '', entities = '[]'::jsonb,
+		    payload = '{}'::jsonb, reply_markup = NULL
+		FROM chat_settings s
+		WHERE s.chat_id = m.chat_id
+		  AND s.auto_delete_seconds > 0
+		  AND m.deleted_at IS NULL
+		  AND m.created_at < now() - make_interval(secs => s.auto_delete_seconds)
+		  AND m.id IN (
+		      SELECT m2.id
+		      FROM messages m2
+		      JOIN chat_settings s2 ON s2.chat_id = m2.chat_id
+		      WHERE s2.auto_delete_seconds > 0
+		        AND m2.deleted_at IS NULL
+		        AND m2.created_at < now() - make_interval(secs => s2.auto_delete_seconds)
+		      ORDER BY m2.created_at
+		      LIMIT $1)`, autoDeleteBatch)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *Runner) expireStories(ctx context.Context) (int64, error) {

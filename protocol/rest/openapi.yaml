@@ -5286,18 +5286,38 @@ components:
 
     ChatSettings:
       type: object
+      description: |
+        The administrative knobs on a chat. Field names here match the server
+        exactly; an earlier version of this document named three of them
+        differently and described one that does not exist.
       properties:
-        slow_mode_seconds: { type: integer }
-        approval_required:
+        slow_mode_seconds:
+          type: integer
+          description: How long an ordinary member waits between posts. Staff are exempt.
+        join_requires_approval:
           type: boolean
           description: New members join through a request rather than directly.
-        history_visible_to_new_members: { type: boolean }
+        history_visible_to_new:
+          type: boolean
+          description: Whether someone who joins today can read what was said before.
+        max_members: { type: integer }
+        auto_delete_seconds:
+          type: integer
+          description: |
+            A self-destruct timer for the whole chat. Zero leaves messages
+            alone. Anything else is enforced by the worker, which tombstones a
+            message and clears its content once it is that old — the row stays
+            so `seq` remains contiguous, but the text is gone.
         default_permissions:
           type: object
           additionalProperties: { type: boolean }
-        sign_messages:
-          type: boolean
-          description: Channel posts carry the posting admin's name.
+          description: |
+            What ordinary members may do, chat-wide. Only the keys present are
+            changed. It sits under each member's own overrides, so a chat that
+            forbids media can still grant one person an exception, and it does
+            not apply to owners, admins or moderators — applying it to them
+            would let one switch lock the staff out of moderating the chat they
+            had just restricted.
 
     InviteLink:
       type: object

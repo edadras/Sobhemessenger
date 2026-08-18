@@ -56,23 +56,24 @@ type ChatContext struct {
 
 func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUID) (*ChatContext, error) {
 	var (
-		result     ChatContext
-		role       *string
-		rawPerms   []byte
-		slowMode   *int
-		autoDelete *int
+		result       ChatContext
+		role         *string
+		rawPerms     []byte
+		slowMode     *int
+		autoDelete   *int
+		chatDefaults []byte
 	)
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT c.id, c.type, c.member_count, c.last_seq,
 		       m.role, m.permissions, m.muted_until,
-		       s.slow_mode_seconds, s.auto_delete_seconds
+		       s.slow_mode_seconds, s.auto_delete_seconds, s.default_permissions
 		FROM chats c
 		LEFT JOIN chat_members m ON m.chat_id = c.id AND m.user_id = $2 AND m.left_at IS NULL
 		LEFT JOIN chat_settings s ON s.chat_id = c.id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`,
 		chatID, userID,
 	).Scan(&result.ChatID, &result.ChatType, &result.MemberCount, &result.LastSeq,
-		&role, &rawPerms, &result.MutedUntil, &slowMode, &autoDelete)
+		&role, &rawPerms, &result.MutedUntil, &slowMode, &autoDelete, &chatDefaults)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}
@@ -83,7 +84,19 @@ func (r *Repository) ChatContextFor(ctx context.Context, chatID, userID uuid.UUI
 	if role != nil {
 		result.IsMember = true
 		result.Role = *role
-		result.Permissions = applyOverrides(PermissionsForRole(*role, result.ChatType), rawPerms)
+		// Three layers, narrowest last: what the role grants, what the chat
+		// restricts for everyone, and what this one member has been given or
+		// denied personally.
+		//
+		// The chat-wide layer applies to ordinary members only. It is how an
+		// admin says "nobody may post media here" — and if it applied to staff
+		// too, the same switch would lock the admins out of moderating the chat
+		// they had just restricted.
+		permissions := PermissionsForRole(*role, result.ChatType)
+		if *role == RoleMember || *role == RoleRestricted {
+			permissions = applyOverrides(permissions, chatDefaults)
+		}
+		result.Permissions = applyOverrides(permissions, rawPerms)
 	}
 	if slowMode != nil {
 		result.SlowMode = *slowMode
