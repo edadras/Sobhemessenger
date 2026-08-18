@@ -65,6 +65,11 @@ const (
 	EventChatMemberLeft  = "chat.member_left"
 	EventTypingStart     = "typing.start"
 	EventTypingStop      = "typing.stop"
+	// EventChatHistoryCleared tells a device to drop everything it holds for
+	// a chat below the watermark in the payload. It is not a delete: the chat
+	// survives, and so does the other member's copy unless the caller asked
+	// for both.
+	EventChatHistoryCleared = "chat.history_cleared"
 )
 
 // Chat is a conversation container of any type.

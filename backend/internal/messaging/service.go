@@ -403,6 +403,53 @@ func (s *Service) History(ctx context.Context, chatID, userID uuid.UUID, beforeS
 	return messages, nil
 }
 
+// ClearHistory empties a conversation without leaving it.
+//
+// The default is one-sided and always permitted: what the caller keeps in
+// their own copy of a chat is theirs to discard. Clearing it for everyone is
+// destructive to someone else's copy, so it is allowed only where deleting
+// their messages one by one would also have been — a one-to-one chat, or a
+// group where the caller may delete other people's messages.
+func (s *Service) ClearHistory(ctx context.Context, chatID, actorID uuid.UUID, forEveryone bool) (int64, error) {
+	chatCtx, err := s.repo.ChatContextFor(ctx, chatID, actorID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return 0, httpx.NotFound(httpx.CodeChatNotFound, "Chat not found")
+		}
+		return 0, httpx.Internal(err)
+	}
+	if !chatCtx.IsMember {
+		return 0, httpx.Forbidden(httpx.CodeNotChatMember, "You are not a member of this chat")
+	}
+	if forEveryone {
+		switch chatCtx.ChatType {
+		case ChatPrivate, ChatSecret:
+			// Two people, one conversation: either may end it for both.
+		default:
+			if !chatCtx.Permissions.DeleteMessages {
+				return 0, httpx.Forbidden(httpx.CodeForbidden,
+					"You cannot clear this chat for everyone")
+			}
+		}
+	}
+
+	watermark, recipients, err := s.repo.ClearHistory(ctx, chatID, actorID, forEveryone)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return 0, httpx.NotFound(httpx.CodeChatNotFound, "Chat not found")
+		case errors.Is(err, ErrNotMember):
+			return 0, httpx.Forbidden(httpx.CodeNotChatMember, "You are not a member of this chat")
+		}
+		return 0, httpx.Internal(err)
+	}
+
+	s.broadcast(ctx, chatCtx, EventChatHistoryCleared,
+		&SendResult{Recipients: recipients, FannedOut: true},
+		map[string]any{"chat_id": chatID, "upto_seq": watermark, "for_everyone": forEveryone})
+	return watermark, nil
+}
+
 // Edit updates a message the caller sent, inside the edit window.
 func (s *Service) Edit(ctx context.Context, messageID, editorID uuid.UUID, content string, entities json.RawMessage) (*Message, error) {
 	content = strings.TrimSpace(content)

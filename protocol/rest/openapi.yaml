@@ -547,6 +547,42 @@ paths:
       responses:
         "200": { description: Broadcast }
 
+  /api/v1/chats/{chatID}/clear-history:
+    post:
+      tags: [Chats]
+      summary: Empty a chat without leaving it
+      description: >
+        Clears the caller's own copy of the conversation by moving a per-member
+        watermark; nothing is deleted and the other member's history is
+        untouched. `for_everyone` is the destructive form and is allowed only
+        in a one-to-one chat, or where the caller may delete other people's
+        messages.
+      parameters:
+        - name: chatID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                for_everyone: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chat_id: { type: string, format: uuid }
+                  cleared_upto_seq: { type: integer, format: int64 }
+                  for_everyone: { type: boolean }
+        "403": { description: Not a member, or not allowed to clear for everyone }
+
   /api/v1/messages/{messageID}:
     patch:
       tags: [Messages]

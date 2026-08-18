@@ -585,6 +585,13 @@ func (r *Repository) History(ctx context.Context, chatID, viewerID uuid.UUID, be
 		WHERE m.chat_id = $1
 		  AND ($3::bigint IS NULL OR m.seq < $3)
 		  AND ($4::bigint IS NULL OR m.seq > $4)
+		  -- Everything at or below the viewer's watermark was cleared by them
+		  -- and must stay invisible to them alone; the rows are untouched and
+		  -- every other member still reads them.
+		  AND m.seq > COALESCE((
+		      SELECT cm.history_cleared_seq FROM chat_members cm
+		      WHERE cm.chat_id = $1 AND cm.user_id = $2
+		  ), 0)
 		ORDER BY m.seq DESC
 		LIMIT $5`, chatID, viewerID, beforeSeq, afterSeq, limit)
 	if err != nil {
@@ -730,6 +737,113 @@ func (r *Repository) Delete(ctx context.Context, messageID, actorID uuid.UUID) (
 		return err
 	})
 	return chatID, seq, recipients, err
+}
+
+// ClearHistory empties a chat for the caller, and optionally for everyone.
+//
+// The one-sided form writes no rows to `messages` at all: it moves a
+// per-member watermark up to the chat's current sequence, and every read path
+// filters below it. That makes the operation O(1) whatever the history is
+// worth, survives the other member continuing to post, and cannot corrupt a
+// conversation the caller only wanted out of their own view.
+//
+// `forEveryone` is the destructive form. It tombstones the messages the way
+// deleting each one individually would, so the other side sees them go too —
+// the caller must be entitled to that, which the service checks before
+// calling.
+func (r *Repository) ClearHistory(ctx context.Context, chatID, actorID uuid.UUID, forEveryone bool) (int64, []uuid.UUID, error) {
+	var watermark int64
+	var recipients []uuid.UUID
+
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		// The chat row is locked so the watermark cannot land above a message
+		// that a concurrent send is still writing — which would hide it from
+		// the caller for good.
+		if err := tx.QueryRow(ctx,
+			`SELECT last_seq FROM chats WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+			chatID).Scan(&watermark); err != nil {
+			if database.IsNoRows(err) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("messaging: lock chat: %w", err)
+		}
+
+		if forEveryone {
+			if _, err := tx.Exec(ctx, `
+				UPDATE messages
+				SET deleted_at = now(), deleted_by = $2, content = '',
+				    entities = '[]'::jsonb, payload = '{}'::jsonb, reply_markup = NULL
+				WHERE chat_id = $1 AND seq <= $3 AND deleted_at IS NULL`,
+				chatID, actorID, watermark); err != nil {
+				return fmt.Errorf("messaging: tombstone history: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM message_attachments a
+				USING messages m
+				WHERE a.message_id = m.id AND m.chat_id = $1 AND m.seq <= $2`,
+				chatID, watermark); err != nil {
+				return fmt.Errorf("messaging: drop attachments: %w", err)
+			}
+			// Every member is watermarked, not just the caller. The tombstones
+			// would otherwise stay in everyone else's history as a row of
+			// "message deleted" placeholders, which is not what deleting a
+			// conversation for both sides is supposed to leave behind.
+			if _, err := tx.Exec(ctx, `
+				UPDATE chat_members
+				SET history_cleared_seq = GREATEST(history_cleared_seq, $2),
+				    last_read_seq = GREATEST(last_read_seq, $2),
+				    last_delivered_seq = GREATEST(last_delivered_seq, $2),
+				    unread_count = 0, mention_count = 0
+				WHERE chat_id = $1 AND left_at IS NULL`, chatID, watermark); err != nil {
+				return fmt.Errorf("messaging: reset counters: %w", err)
+			}
+		}
+
+		tag, err := tx.Exec(ctx, `
+			UPDATE chat_members
+			SET history_cleared_seq = GREATEST(history_cleared_seq, $3),
+			    last_read_seq = GREATEST(last_read_seq, $3),
+			    last_delivered_seq = GREATEST(last_delivered_seq, $3),
+			    unread_count = 0, mention_count = 0
+			WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+			chatID, actorID, watermark)
+		if err != nil {
+			return fmt.Errorf("messaging: clear history: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotMember
+		}
+
+		payload, err := json.Marshal(map[string]any{
+			"chat_id": chatID, "upto_seq": watermark, "for_everyone": forEveryone,
+		})
+		if err != nil {
+			return err
+		}
+		if forEveryone {
+			recipients, _, err = appendUserEvents(ctx, tx, chatID, EventChatHistoryCleared, payload)
+			return err
+		}
+
+		// A one-sided clear is nobody else's business, but the caller's other
+		// devices still have to be told, or they keep showing the history
+		// this one just dropped.
+		var seq int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO user_event_counters (user_id, last_seq) VALUES ($1, 1)
+			ON CONFLICT (user_id) DO UPDATE SET last_seq = user_event_counters.last_seq + 1
+			RETURNING last_seq`, actorID).Scan(&seq); err != nil {
+			return fmt.Errorf("messaging: bump event counter: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO user_events (user_id, seq, type, payload) VALUES ($1, $2, $3, $4)`,
+			actorID, seq, EventChatHistoryCleared, payload); err != nil {
+			return fmt.Errorf("messaging: append clear event: %w", err)
+		}
+		recipients = []uuid.UUID{actorID}
+		return nil
+	})
+	return watermark, recipients, err
 }
 
 // MarkRead advances the caller's read cursor and clears the unread counters.

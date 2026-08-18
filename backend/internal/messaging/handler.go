@@ -33,6 +33,7 @@ func (h *Handler) RegisterChatRoutes(r chi.Router) {
 	r.Post("/{chatID}/read", h.markRead)
 	r.Put("/{chatID}/draft", h.setDraft)
 	r.Post("/{chatID}/typing", h.typing)
+	r.Post("/{chatID}/clear-history", h.clearHistory)
 }
 
 // RegisterMessageRoutes adds the per-message routes to a shared router, so
@@ -151,6 +152,40 @@ func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 		meta.NextCursor = strconv.FormatInt(messages[len(messages)-1].Seq, 10)
 	}
 	httpx.JSONWithMeta(w, r, http.StatusOK, map[string]any{"messages": messages}, meta)
+}
+
+func (h *Handler) clearHistory(w http.ResponseWriter, r *http.Request) {
+	principal, err := httpx.MustPrincipal(r.Context())
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	chatID, err := pathUUID(r, "chatID")
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+
+	// An empty body is the common case — clear it for me — so it is allowed
+	// rather than rejected as malformed.
+	var body struct {
+		ForEveryone bool `json:"for_everyone,omitempty"`
+	}
+	if r.ContentLength > 0 {
+		if err := httpx.DecodeJSON(r, &body); err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+	}
+
+	watermark, err := h.service.ClearHistory(r.Context(), chatID, principal.UserID, body.ForEveryone)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, r, http.StatusOK, map[string]any{
+		"chat_id": chatID, "cleared_upto_seq": watermark, "for_everyone": body.ForEveryone,
+	})
 }
 
 type sendBody struct {
