@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/sobh/messenger/backend/internal/admin"
@@ -260,6 +261,9 @@ func Assemble(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps
 	// weighs it.
 	antispamService := antispam.NewService(antispam.NewRepository(db))
 	messagingService.SetSpamGuard(antispamService)
+	// Presence was recorded on every connect and read by nothing. The adapter
+	// keeps users from importing presence, which would be a cycle.
+	usersService.SetPresence(presenceAdapter{presenceService})
 	contactsService.SetSpamRecorder(antispamService)
 
 	dataRightsService := datarights.NewService(datarights.NewRepository(db))
@@ -374,7 +378,7 @@ func (a *App) buildRouter(
 		// bookmark and follow state for readers who do have one (§25).
 		api.Group(func(public chi.Router) {
 			public.Use(authMiddleware.OptionalAuth)
-			public.Mount("/news", newsHandler.PublicRoutes())
+			public.With(a.Flags.Gate("news_enabled")).Mount("/news", newsHandler.PublicRoutes())
 		})
 
 		api.Group(func(private chi.Router) {
@@ -390,7 +394,7 @@ func (a *App) buildRouter(
 			private.Mount("/contacts", contactsHandler.Routes())
 			// The server's half of end-to-end encryption: a key directory and a
 			// mailbox for ciphertext it cannot read (§24).
-			private.Mount("/secret", secretChatHandler.Routes())
+			private.With(a.Flags.Gate("secret_chats_enabled")).Mount("/secret", secretChatHandler.Routes())
 			private.Route("/chats", func(chats chi.Router) {
 				messagingHandler.RegisterChatRoutes(chats)
 				messagingHandler.RegisterOrganiseRoutes(chats)
@@ -404,11 +408,11 @@ func (a *App) buildRouter(
 			if mediaHandler != nil {
 				private.Mount("/media", mediaHandler.Routes())
 			}
-			private.Mount("/communities", communitiesHandler.Routes())
-			private.Mount("/stories", storiesHandler.Routes())
+			private.With(a.Flags.Gate("communities_enabled")).Mount("/communities", communitiesHandler.Routes())
+			private.With(a.Flags.Gate("stories_enabled")).Mount("/stories", storiesHandler.Routes())
 			private.Mount("/polls", pollsHandler.Routes())
-			private.Mount("/calls", callsHandler.Routes())
-			private.Mount("/news-reader", newsHandler.ReaderRoutes())
+			private.With(a.Flags.Gate("calls_enabled")).Mount("/calls", callsHandler.Routes())
+			private.With(a.Flags.Gate("news_enabled")).Mount("/news-reader", newsHandler.ReaderRoutes())
 			private.Mount("/notifications", notificationsHandler.Routes())
 			private.Mount("/search", searchHandler.Routes())
 			private.Mount("/reports", adminHandler.ReportRoutes())
@@ -519,4 +523,23 @@ func allowedOrigins(cfg *config.Config) []string {
 		return nil
 	}
 	return []string{"*"}
+}
+
+// presenceAdapter lets the users module read presence without importing it.
+//
+// The two Status types are deliberately separate: users needs "online, and
+// when were they last here", and presence owns how that is stored. A shared
+// type would make one package's storage decision the other's API.
+type presenceAdapter struct{ service *presence.Service }
+
+func (a presenceAdapter) Statuses(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]users.Status, error) {
+	raw, err := a.service.Statuses(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]users.Status, len(raw))
+	for id, status := range raw {
+		out[id] = users.Status{Online: status.Online, LastSeen: status.LastSeen}
+	}
+	return out, nil
 }

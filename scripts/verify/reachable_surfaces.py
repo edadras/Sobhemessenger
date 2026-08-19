@@ -718,6 +718,35 @@ check("the banner endpoint answers", status == 200, f"{status} {body}")
 check("no breaking story is an answer, not an error",
       "article" in data_of(body), str(data_of(body)))
 
+# --------------------------------------------------------- feature flags
+
+section("a flag that is off actually turns something off")
+
+# Flags could be toggled in the panel and nothing on the server read one, so
+# switching a feature off left it running. The seed ships them on, so what is
+# checked here is that a gated route serves while its flag is on — the refusal
+# path is covered by the unit test, which can turn a flag off without taking
+# the feature away from the rest of this run.
+for label, path in (
+    ("stories", "/stories"),
+    ("calls", "/calls"),
+    ("communities", "/communities"),
+):
+    status, body = call("GET", path, alice_token)
+    check(f"{label} is served while its flag is on",
+          status == 200, f"{status} {body}")
+
+status, body = call("GET", "/feature-flags", alice_token)
+flags = {f["key"]: f for f in (data_of(body).get("flags") or [])}
+check("the flags can be read", status == 200, f"{status} {body}")
+for key in ("stories_enabled", "calls_enabled", "communities_enabled",
+            "secret_chats_enabled"):
+    # A flag the seed leaves off would take its feature away from every
+    # deployment that starts from it, which is what these being FALSE used to
+    # hide while nothing read them.
+    check(f"{key} is on in the baseline",
+          flags.get(key, {}).get("enabled") is True, str(flags.get(key)))
+
 # ------------------------------------------- what the app can now reach
 
 section("the clients that existed and nothing called")

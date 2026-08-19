@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/storage/local_database.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
+import '../../../core/widgets/async_states.dart';
 import '../../auth/session_controller.dart';
 import '../../groups/presentation/comments_sheet.dart';
 import '../data/chat_repository.dart';
@@ -88,6 +90,22 @@ Future<void> showMessageActions(
                   context,
                   channelId: message.chatId,
                   postId: message.id,
+                );
+              },
+            ),
+          // Who has read it, for the sender. The cursor in the chat list
+          // answers "how far has each person read"; this is the other
+          // question, and it was built with nothing to open it.
+          if (isSent && isOwn)
+            ListTile(
+              leading: const Icon(Icons.done_all),
+              title: Text(l10n.readsTitle),
+              onTap: () {
+                Navigator.of(sheet).pop();
+                showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => MessageReadsSheet(messageId: message.id),
                 );
               },
             ),
@@ -398,6 +416,80 @@ class _ForwardTargetPicker extends ConsumerWidget {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Who has read one message (§7).
+///
+/// The chat list keeps a cursor per person — how far each has read — which is
+/// all a list of conversations needs. This is the question a cursor cannot
+/// answer, asked only when somebody opens the detail for one message, which is
+/// why it is a request rather than something synced for every message on
+/// screen.
+class MessageReadsSheet extends ConsumerWidget {
+  const MessageReadsSheet({super.key, required this.messageId});
+
+  final String messageId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+    final AsyncValue<List<MessageRead>> reads =
+        ref.watch(messageReadsProvider(messageId));
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(SobhSpacing.lg),
+            child: Text(
+              l10n.readsTitle,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          reads.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(SobhSpacing.xl),
+              child: CircularProgressIndicator(),
+            ),
+            error: (Object error, StackTrace _) => Padding(
+              padding: const EdgeInsets.all(SobhSpacing.xl),
+              child: Text(l10n.errorGeneric),
+            ),
+            data: (List<MessageRead> rows) {
+              if (rows.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(SobhSpacing.xl),
+                  child: Text(
+                    l10n.readsNobody,
+                    style: TextStyle(color: palette.textSecondary),
+                  ),
+                );
+              }
+              return Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: rows.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final MessageRead read = rows[index];
+                    return ListTile(
+                      leading: SobhAvatar(name: read.displayName),
+                      title: Text(read.displayName),
+                      trailing: Text(
+                        DateFormat.Hm().format(read.readAt),
+                        style: TextStyle(color: palette.textSecondary),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
           ),
         ],
       ),

@@ -637,5 +637,11 @@
   "foldersAlwaysInclude": "دائمًا في هذا المجلد",
   "foldersAlwaysExclude": "أبدًا في هذا المجلد",
   "foldersFollowRules": "اتّباع قواعد المجلد",
-  "topicsDisableBody": "تُغلق المواضيع ويعود ما قيل في كل منها إلى المحادثة العادية؛ لا يُحذف شيء."
+  "topicsDisableBody": "تُغلق المواضيع ويعود ما قيل في كل منها إلى المحادثة العادية؛ لا يُحذف شيء.",
+  "readsTitle": "من قرأ هذه",
+  "readsNobody": "لا أحد بعد",
+  "settingsDevices": "الأجهزة",
+  "profileIsBot": "بوت",
+  "profileLastSeen": "آخر ظهور {when}",
+  "profileOnline": "متصل"
 }

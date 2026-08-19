@@ -17,6 +17,7 @@ class UserProfile {
     this.language = 'fa',
     this.isBot = false,
     this.lastSeen,
+    this.isOnline = false,
     this.isContact = false,
     this.isBlocked = false,
   });
@@ -44,6 +45,10 @@ class UserProfile {
   final String language;
   final bool isBot;
   final DateTime? lastSeen;
+
+  /// A live connection right now. Governed by the same privacy rule as
+  /// [lastSeen], so a viewer who cannot see one never sees the other.
+  final bool isOnline;
   final bool isContact;
   final bool isBlocked;
 

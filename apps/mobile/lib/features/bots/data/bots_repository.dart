@@ -334,8 +334,3 @@ final FutureProviderFamily<BotWebhook?, String> botWebhookProvider =
     FutureProvider.family<BotWebhook?, String>(
   (Ref ref, String botId) => ref.watch(botsRepositoryProvider).webhook(botId),
 );
-
-final FutureProviderFamily<List<BotCommand>, String> botCommandsProvider =
-    FutureProvider.family<List<BotCommand>, String>(
-  (Ref ref, String botId) => ref.watch(botsRepositoryProvider).commands(botId),
-);

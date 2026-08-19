@@ -10,6 +10,7 @@ import '../../../core/storage/local_database.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../stickers/data/stickers_repository.dart';
 import '../data/bot_interaction_repository.dart';
 
 /// Drawing the message types that are more than text (§12, §13).
@@ -330,5 +331,81 @@ Map<String, dynamic> _decode(String raw) {
     // Malformed JSON in one message must not take the conversation down with
     // it; the bubble falls back to "unsupported".
     return <String, dynamic>{};
+  }
+}
+
+/// The unfurled preview of the first link in a message (§27).
+///
+/// OpenGraph unfurling was built on the server, behind the SSRF guard, with a
+/// cache that also caches failures — and the app never asked for one, so a
+/// link was a link. It renders nothing at all when there is no preview, which
+/// is the common case: most links have no OpenGraph tags, and a box saying so
+/// would be worse than the bare link.
+class LinkPreviewCard extends ConsumerWidget {
+  const LinkPreviewCard({super.key, required this.url});
+
+  final String url;
+
+  /// The first http(s) link in a message, or null. Only the first: a message
+  /// full of links should not become a wall of cards.
+  static String? firstLinkIn(String content) {
+    final RegExpMatch? match =
+        RegExp(r'https?://[^\s<>"]+').firstMatch(content);
+    return match?.group(0);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final SobhPalette palette = SobhTheme.of(context);
+    final LinkPreview? preview =
+        ref.watch(linkPreviewProvider(url)).valueOrNull;
+    if (preview == null || (preview.title.isEmpty && preview.siteName.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: SobhSpacing.xs),
+      child: Container(
+        padding: const EdgeInsets.all(SobhSpacing.sm),
+        decoration: BoxDecoration(
+          color: palette.surfaceVariant,
+          borderRadius: BorderRadius.circular(SobhRadius.md),
+          border: BorderDirectional(
+            start: BorderSide(color: palette.primary, width: 3),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (preview.siteName.isNotEmpty)
+              Text(
+                preview.siteName,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: palette.primary),
+              ),
+            if (preview.title.isNotEmpty)
+              Text(
+                preview.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            if (preview.description.isNotEmpty)
+              Text(
+                preview.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: palette.textSecondary),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }

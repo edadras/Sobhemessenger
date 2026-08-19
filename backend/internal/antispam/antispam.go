@@ -228,26 +228,6 @@ func (s *Service) record(ctx context.Context, subjectType, subjectKey string, we
 	_, _ = s.repo.Record(ctx, subjectType, subjectKey, weight, reason)
 }
 
-// Check reports whether a user may currently start new conversations.
-//
-// A nil service allows everything, so a deployment that has not wired the
-// module in behaves exactly as it did before rather than refusing traffic.
-func (s *Service) Check(ctx context.Context, userID uuid.UUID) (*Score, error) {
-	if s == nil {
-		return nil, nil
-	}
-	score, err := s.repo.Get(ctx, SubjectUser, userID.String())
-	if err != nil {
-		// A scoring table that cannot be read is not a reason to stop
-		// delivering messages.
-		return nil, nil
-	}
-	if score != nil && score.Restricted() {
-		return score, ErrRestricted
-	}
-	return score, nil
-}
-
 // Restricted satisfies messaging.SpamGuard.
 func (s *Service) Restricted(ctx context.Context, userID uuid.UUID) (bool, time.Time) {
 	if s == nil {

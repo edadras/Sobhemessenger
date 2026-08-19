@@ -66,13 +66,6 @@ func (s *Service) Enabled(ctx context.Context, key string, userID uuid.UUID) boo
 	return int(hasher.Sum32()%100) < flag.RolloutPercent
 }
 
-// EnabledGlobally ignores rollout bucketing, for background jobs that have no
-// user context.
-func (s *Service) EnabledGlobally(ctx context.Context, key string) bool {
-	flag, ok := s.lookup(ctx, key)
-	return ok && flag.Enabled
-}
-
 // Require returns a FEATURE_DISABLED error when a flag is off, so a handler can
 // gate itself in one line.
 func (s *Service) Require(ctx context.Context, key string, userID uuid.UUID) error {
@@ -212,4 +205,35 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.JSON(w, r, http.StatusOK, map[string]any{"flags": flags})
+}
+
+// Gate refuses every request under it while a flag is off (§32).
+//
+// Feature flags existed, the panel could toggle them, and nothing on the
+// server ever read one — so switching a feature off left it running. The
+// baseline seed ships four of them off, which made the gap easy to miss in the
+// opposite direction: the features worked, so the flags looked fine.
+//
+// It gates whole route groups rather than individual handlers because that is
+// what a flag names. "Calls are off" is one decision, and a per-handler check
+// would be fifteen places for it to be forgotten in one.
+//
+// The user id comes from the principal when there is one, so a partial
+// rollout buckets by person. An unauthenticated route buckets by the zero
+// UUID, which is stable — everyone anonymous is in the same bucket, which is
+// the only honest answer when there is nobody to bucket by.
+func (s *Service) Gate(key string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var userID uuid.UUID
+			if principal, err := httpx.MustPrincipal(r.Context()); err == nil {
+				userID = principal.UserID
+			}
+			if err := s.Require(r.Context(), key, userID); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

@@ -60,9 +60,17 @@ type Profile struct {
 	Language    string     `json:"language"`
 	IsBot       bool       `json:"is_bot"`
 	// LastSeen is present only when the viewer is permitted to see it (§55).
-	LastSeen  *time.Time `json:"last_seen,omitempty"`
-	IsContact bool       `json:"is_contact"`
-	IsBlocked bool       `json:"is_blocked"`
+	LastSeen *time.Time `json:"last_seen,omitempty"`
+	// IsOnline says the person has a live connection right now. Governed by
+	// the same privacy rule as LastSeen and for the same reason: "online now"
+	// is the sharpest form of "when were they last here", so a viewer who may
+	// not have the second must not be handed the first.
+	//
+	// Presence was recorded on every connect and read by nothing, so this was
+	// tracked in Redis and never surfaced anywhere.
+	IsOnline  bool `json:"is_online"`
+	IsContact bool `json:"is_contact"`
+	IsBlocked bool `json:"is_blocked"`
 }
 
 // SelfProfile adds the fields only the owner may see.
@@ -358,11 +366,66 @@ func (r *Repository) SetPrivacy(ctx context.Context, userID uuid.UUID, setting P
 	return nil
 }
 
+// PresenceReader answers whether accounts have a live connection.
+//
+// An interface, and optional, for the same reason messaging's SpamGuard is
+// one: presence lives on Redis and depends on nothing here, and a dependency
+// back the other way would be a cycle. A nil reader reports everybody offline,
+// so a deployment without it behaves exactly as it did before.
+type PresenceReader interface {
+	Statuses(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]Status, error)
+}
+
+// Status is one account's presence, mirroring presence.Status so this package
+// does not import it.
+type Status struct {
+	Online   bool
+	LastSeen *time.Time
+}
+
 type Service struct {
-	repo *Repository
+	repo     *Repository
+	presence PresenceReader
 }
 
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+
+// SetPresence installs the presence reader. Called during assembly, before
+// the service serves anything.
+func (s *Service) SetPresence(reader PresenceReader) { s.presence = reader }
+
+// withPresence fills in IsOnline for profiles the viewer may see last seen on.
+//
+// The privacy gate is already applied by the query — a viewer who may not see
+// last seen gets a nil LastSeen — so keying off that is what keeps one rule in
+// one place instead of two that can drift.
+func (s *Service) withPresence(ctx context.Context, profiles ...*Profile) {
+	if s.presence == nil {
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile != nil && profile.LastSeen != nil {
+			ids = append(ids, profile.UserID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	// Best effort: presence is a nicety, and a Redis blip must not turn a
+	// profile into an error.
+	statuses, err := s.presence.Statuses(ctx, ids)
+	if err != nil {
+		return
+	}
+	for _, profile := range profiles {
+		if profile != nil {
+			profile.IsOnline = statuses[profile.UserID].Online
+		}
+	}
+}
 
 func (s *Service) Profile(ctx context.Context, userID, viewerID uuid.UUID) (*Profile, error) {
 	profile, err := s.repo.ByID(ctx, userID, viewerID)
@@ -372,6 +435,7 @@ func (s *Service) Profile(ctx context.Context, userID, viewerID uuid.UUID) (*Pro
 		}
 		return nil, httpx.Internal(err)
 	}
+	s.withPresence(ctx, profile)
 	return profile, nil
 }
 
@@ -383,6 +447,7 @@ func (s *Service) ByUsername(ctx context.Context, username string, viewerID uuid
 		}
 		return nil, httpx.Internal(err)
 	}
+	s.withPresence(ctx, profile)
 	return profile, nil
 }
 

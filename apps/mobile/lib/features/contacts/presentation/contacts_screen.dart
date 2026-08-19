@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../../chat/data/chat_repository.dart';
+import '../../profile/presentation/user_profile_sheet.dart';
 import '../../secretchat/data/secret_chat_service.dart';
 import '../../secretchat/presentation/secret_chat_screen.dart';
 import '../data/address_book.dart';
@@ -200,6 +201,14 @@ class _ContactTile extends ConsumerWidget {
 
     return ListTile(
       onTap: () => _openChat(context, ref),
+      // Holding shows who they are rather than opening a conversation with
+      // them. Reading another person's profile was built and reachable from
+      // nowhere, so the only way to see somebody's bio was to be them.
+      onLongPress: () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => UserProfileSheet(userId: contact.userId),
+      ),
       leading: SobhAvatar(name: contact.label),
       title: Text(contact.label, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: contact.username != null

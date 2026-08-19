@@ -365,6 +365,11 @@ class SessionsScreen extends ConsumerWidget {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<List<UserSession>> sessions =
         ref.watch(sessionListProvider);
+    // The devices behind those sessions. A session is a login; a device is the
+    // thing it was made from, and the two lists answer different questions —
+    // "what is signed in" and "what have I ever signed in from". The device
+    // list was fetched by nothing.
+    final AsyncValue<List<UserDevice>> devices = ref.watch(deviceListProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -386,9 +391,15 @@ class SessionsScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(sessionListProvider),
         ),
         data: (List<UserSession> rows) => ListView.separated(
-          itemCount: rows.length,
+          // One row per session, then the devices under a heading of their
+          // own. Interleaving them would suggest a one-to-one relationship
+          // that does not hold: a device can have several sessions over time.
+          itemCount: rows.length + 1,
           separatorBuilder: (_, __) => const Divider(height: 1),
           itemBuilder: (BuildContext context, int index) {
+            if (index == rows.length) {
+              return _DeviceList(devices: devices);
+            }
             final UserSession session = rows[index];
             return ListTile(
               leading: Icon(
@@ -498,6 +509,52 @@ class LoginHistoryScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// The devices this account has been used from (§56).
+class _DeviceList extends StatelessWidget {
+  const _DeviceList({required this.devices});
+
+  final AsyncValue<List<UserDevice>> devices;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+
+    // Silent when it fails: the sessions above are the actionable list, and an
+    // error over a supplementary one would make the screen look broken.
+    final List<UserDevice> rows = devices.valueOrNull ?? const <UserDevice>[];
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _SectionHeader(title: l10n.settingsDevices),
+        for (final UserDevice device in rows)
+          ListTile(
+            leading: Icon(
+              switch (device.platform) {
+                'android' || 'ios' => Icons.smartphone,
+                'web' => Icons.language,
+                _ => Icons.computer,
+              },
+              color: device.isCurrent ? palette.primary : null,
+            ),
+            title: Text(device.name.isEmpty ? device.platform : device.name),
+            subtitle: Text(
+              <String>[
+                if (device.appVersion.isNotEmpty) device.appVersion,
+                DateFormat.yMd().add_Hm().format(device.lastSeenAt),
+                if (device.isCurrent) l10n.settingsSessionsCurrent,
+              ].join(' · '),
+            ),
+          ),
+      ],
     );
   }
 }

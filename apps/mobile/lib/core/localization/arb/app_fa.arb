@@ -821,5 +821,18 @@
   "foldersAlwaysInclude": "همیشه در این پوشه",
   "foldersAlwaysExclude": "هرگز در این پوشه",
   "foldersFollowRules": "پیروی از قاعده‌های پوشه",
-  "topicsDisableBody": "موضوع‌ها خاموش می‌شوند و آنچه در هرکدام گفته شده به گفتگوی معمولی بازمی‌گردد؛ چیزی حذف نمی‌شود."
+  "topicsDisableBody": "موضوع‌ها خاموش می‌شوند و آنچه در هرکدام گفته شده به گفتگوی معمولی بازمی‌گردد؛ چیزی حذف نمی‌شود.",
+  "readsTitle": "چه کسانی خوانده‌اند",
+  "readsNobody": "هنوز کسی نخوانده",
+  "settingsDevices": "دستگاه‌ها",
+  "profileIsBot": "بات",
+  "profileLastSeen": "آخرین بازدید: {when}",
+  "@profileLastSeen": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "profileOnline": "آنلاین"
 }

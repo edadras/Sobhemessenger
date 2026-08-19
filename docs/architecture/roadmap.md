@@ -60,6 +60,7 @@ A feature is complete only when all of the following hold:
 | 34 | Named role bundles, read receipts, call sessions (§14, §7, §20) | done: a bundle resolved between the chat's defaults and a member's overrides, who has read one message, and one signalling row per participant so a reconnect does not start from nothing |
 | 35 | Article galleries and translations (§25) | done: an ordered gallery and a per-locale translation that is a draft until someone signs it off |
 | 36 | Clients for the surfaces nothing called | done: the sign-in log, close friends, live location updates, channel statistics, ownership transfer, editorial authors and spam scores — see below |
+| 40 | Flags that gate, presence that shows | done: feature flags enforced on the routes they name, live presence surfaced on a profile under the same privacy rule as last seen, and the last six client-side dead ends wired |
 | 39 | The clients nothing called | done: inline mode, promoting a member, linking a discussion group, adding a community room, following a news category, looking up an exact handle, validating a sticker-set slug, editing a bot's commands, per-chat folder overrides, turning a forum off, and the unread badge |
 | 38 | The last five | done: setting the two-step password, drafts that follow you between devices, reading one forum topic on its own, the breaking-news banner, and a past call's negotiation record |
 | 37 | The rest of the unreachable surfaces | done: redeeming an invite link, counting a channel post's views, data export and account deletion, the recovery flow itself, poll voters, secret-session records, community room removal, bans, operator roles, search reindexing, news categories, and the network a call leg is on |
@@ -158,6 +159,29 @@ checked it existed, so a typo was stored and simply produced no stickers —
 indistinguishable from a set that had none. And the unread notification count
 was fetched by nothing, so a story, a contact request or a news alert arrived
 with nothing to say so.
+
+A fifth pass asked the same question of every layer instead of only the client
+one — providers nothing watches, screens nothing opens, service methods nothing
+calls — and found the two largest instances of it in the project.
+
+**Feature flags gated nothing.** `featureflags.Require` existed, the panel
+could toggle a flag, and no route ever consulted one, so switching a feature
+off left it running. The baseline seed made it easy to miss in the opposite
+direction: it shipped `stories_enabled`, `calls_enabled`, `communities_enabled`
+and `secret_chats_enabled` as FALSE, and all four features worked, so the flags
+looked fine. They are now enforced on the route groups they name, and the seed
+says TRUE for what is built. An unknown flag key refuses rather than defaulting
+to on — a typo in a gate must not silently open what it guards.
+
+**Presence was recorded and never read.** Every connection marked the account
+online in Redis and nothing ever asked. A profile now carries `is_online`,
+governed by the same privacy rule as last seen and for the same reason: online
+now is the sharpest form of when were they last here, so a viewer who may not
+have the second must not be handed the first.
+
+The rest were client-side: who watched a story, who has read a message, the
+device list, link previews, and another person's profile — each fully built,
+each opened by nothing.
 
 `scripts/verify/reachable_surfaces.py` is the probe that asks these questions
 from the client's side, and it is where all of them came from.

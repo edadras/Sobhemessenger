@@ -4,11 +4,15 @@
 INSERT INTO feature_flags (key, enabled, rollout_percent, description) VALUES
     ('messaging_enabled',    TRUE,  100, 'Private chats and groups'),
     ('channels_enabled',     TRUE,  100, 'Channels and channel posts'),
-    ('communities_enabled',  FALSE, 100, 'Communities grouping channels and groups'),
-    ('stories_enabled',      FALSE, 100, 'User and channel stories'),
-    ('calls_enabled',        FALSE, 100, 'Voice and video calls'),
-    ('group_calls_enabled',  FALSE, 100, 'Multi-party calls'),
-    ('secret_chats_enabled', FALSE, 100, 'End-to-end encrypted chats'),
+    -- These were FALSE while the features did not exist. They are built now,
+    -- and the flags are read: leaving them off would ship a deployment where
+    -- stories, calls, communities and secret chats are refused with
+    -- FEATURE_DISABLED, which is exactly what a flag nobody read used to hide.
+    ('communities_enabled',  TRUE,  100, 'Communities grouping channels and groups'),
+    ('stories_enabled',      TRUE,  100, 'User and channel stories'),
+    ('calls_enabled',        TRUE,  100, 'Voice and video calls'),
+    ('group_calls_enabled',  TRUE,  100, 'Multi-party calls'),
+    ('secret_chats_enabled', TRUE,  100, 'End-to-end encrypted chats'),
     ('news_enabled',         TRUE,  100, 'News feed and articles'),
     ('breaking_news_enabled',TRUE,  100, 'Breaking news push notifications'),
     ('ai_enabled',           FALSE, 100, 'AI summary, search and transcription'),

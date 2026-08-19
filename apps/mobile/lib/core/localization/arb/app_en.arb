@@ -637,5 +637,11 @@
   "foldersAlwaysInclude": "Always in this folder",
   "foldersAlwaysExclude": "Never in this folder",
   "foldersFollowRules": "Follow the folder's rules",
-  "topicsDisableBody": "Topics go off and what was said in each returns to the ordinary conversation; nothing is deleted."
+  "topicsDisableBody": "Topics go off and what was said in each returns to the ordinary conversation; nothing is deleted.",
+  "readsTitle": "Who has read this",
+  "readsNobody": "Nobody yet",
+  "settingsDevices": "Devices",
+  "profileIsBot": "Bot",
+  "profileLastSeen": "Last seen {when}",
+  "profileOnline": "Online"
 }

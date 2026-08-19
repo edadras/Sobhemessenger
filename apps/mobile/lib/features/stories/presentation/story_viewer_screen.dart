@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
+import '../../auth/session_controller.dart';
 import '../data/stories_repository.dart';
+import 'story_composer_screen.dart';
 
 /// How long a story stays on screen before advancing.
 const Duration _storyDuration = Duration(seconds: 5);
@@ -93,6 +95,8 @@ class _StoryViewerScreenState extends ConsumerState<StoryViewerScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Only the author sees who watched. The server enforces the same rule.
+    final String? me = ref.watch(sessionControllerProvider).userId;
     final AppLocalizations l10n = AppLocalizations.of(context);
     final SobhPalette palette = SobhTheme.of(context);
 
@@ -161,10 +165,31 @@ class _StoryViewerScreenState extends ConsumerState<StoryViewerScreen>
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ),
-                      Text(
-                        l10n.storiesViewers(widget.stories[_index].viewCount),
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
+                      // The count was shown to everybody and the list of who
+                      // behind it was reachable from nowhere — the sheet, its
+                      // provider and its client all existed. Only the author
+                      // may see the names, which is why the tap is theirs
+                      // alone; the server refuses anyone else regardless.
+                      if (widget.stories[_index].authorId == me)
+                        TextButton(
+                          onPressed: () => showModalBottomSheet<void>(
+                            context: context,
+                            isScrollControlled: true,
+                            builder: (_) => StoryViewersSheet(
+                              storyId: widget.stories[_index].id,
+                            ),
+                          ),
+                          child: Text(
+                            l10n.storiesViewers(
+                              widget.stories[_index].viewCount,
+                            ),
+                          ),
+                        )
+                      else
+                        Text(
+                          l10n.storiesViewers(widget.stories[_index].viewCount),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                       IconButton(
                         icon: const Icon(Icons.close),
                         onPressed: () => Navigator.of(context).maybePop(),

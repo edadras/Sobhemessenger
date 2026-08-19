@@ -838,6 +838,16 @@ class _MessageBubble extends StatelessWidget {
                   message.payloadJson != null)
                 ContactBubble(payloadJson: message.payloadJson!),
 
+              if (!isDeleted && message.content.isNotEmpty)
+                Builder(
+                  builder: (BuildContext context) {
+                    final String? link =
+                        LinkPreviewCard.firstLinkIn(message.content);
+                    return link == null
+                        ? const SizedBox.shrink()
+                        : LinkPreviewCard(url: link);
+                  },
+                ),
               if (isDeleted || message.content.isNotEmpty)
                 Text(
                   isDeleted ? l10n.chatMessageDeleted : message.content,

@@ -637,5 +637,11 @@
   "foldersAlwaysInclude": "Her zaman bu klasörde",
   "foldersAlwaysExclude": "Asla bu klasörde",
   "foldersFollowRules": "Klasörün kurallarına uy",
-  "topicsDisableBody": "Konular kapanır ve her birinde söylenenler olağan sohbete döner; hiçbir şey silinmez."
+  "topicsDisableBody": "Konular kapanır ve her birinde söylenenler olağan sohbete döner; hiçbir şey silinmez.",
+  "readsTitle": "Bunu kimler okudu",
+  "readsNobody": "Henüz kimse yok",
+  "settingsDevices": "Cihazlar",
+  "profileIsBot": "Bot",
+  "profileLastSeen": "Son görülme {when}",
+  "profileOnline": "Çevrimiçi"
 }

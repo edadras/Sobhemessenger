@@ -15,7 +15,7 @@ dependencies up, and `SMS_ECHO_CODES=true` so the probes can sign in.
 | `realtime.py` | Does a message actually arrive? Two people, two sockets: delivery and its latency against the §79 budget, typing, read receipts, reactions, edits and deletions, catching up after being offline, and that a non-member's socket receives nothing. |
 | `bot_api_and_media.py` | Can a bot hold a conversation with its own token — authenticate, receive a command as an update, reply, attach an inline keyboard — and does an upload session open? |
 | `worker.sh` | Does the worker bind all six job consumers, and does it do real work? Schedules a post, moves its time into the past, and waits for the scheduler to publish it into the conversation. |
-| `reachable_surfaces.py` | Do the surfaces that had no client work, and answer in a shape a client can read? The sign-in log, close friends, live location, channel statistics, ownership transfer, role bundles, read receipts, call sessions, invite links, post views, data export and deletion, poll voters, call signalling, the two-step password, synced drafts, per-topic reading, the breaking banner, and the twelve clients that existed with nothing calling them — 143 checks. |
+| `reachable_surfaces.py` | Do the surfaces that had no client work, and answer in a shape a client can read? The sign-in log, close friends, live location, channel statistics, ownership transfer, role bundles, read receipts, call sessions, invite links, post views, data export and deletion, poll voters, call signalling, the two-step password, synced drafts, per-topic reading, the breaking banner, the twelve clients that existed with nothing calling them, and that a feature flag gates what it names — 151 checks. |
 | `new_surfaces.py` | Do the nine features that had no code work through the API the app calls? Clearing history one side at a time, channel signatures and comments, the discussion-group link, the group sticker set and broadcast mode, contact requests, email recovery, chat folders and forum topics — 65 checks, each a claim about behaviour rather than a status code. |
 
 The stack these run against applies `database/seeds/0001_baseline.sql`. Without
@@ -58,6 +58,12 @@ Making a skipped check loud found two more things immediately: the
 username-lookup check had never run at all, because the fixture it depended on
 came back empty and the `if` silently swallowed it, and `/news/categories`
 answered `null` for an empty list.
+
+A fourth pass asked the question of every layer rather than just the client
+one: providers nothing watches, screens nothing opens, service methods nothing
+calls. It found that feature flags gated nothing — the panel could switch a
+feature off and it stayed on — and that presence was recorded on every
+connection and read by no one.
 
 `every_endpoint.py` found the news feed returning 500 on every request: the
 query named four placeholders and always passed six arguments, so PostgreSQL
