@@ -5,6 +5,7 @@ import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../stickers/data/stickers_repository.dart';
 import '../data/comments_repository.dart';
 import '../data/groups_repository.dart';
 
@@ -56,6 +57,9 @@ class ChatSettingsScreen extends ConsumerWidget {
                   current.copyWith(commentsEnabled: value),
                 ),
               ),
+            // Unlinking was offered and linking was not, so a channel could
+            // lose its discussion group and never get one — which made comments
+            // a setting that could only ever be switched off.
             if (current.discussionChatId != null)
               ListTile(
                 leading: const Icon(Icons.forum_outlined),
@@ -64,6 +68,16 @@ class ChatSettingsScreen extends ConsumerWidget {
                 trailing: TextButton(
                   onPressed: () => _unlink(context, ref),
                   child: Text(l10n.channelDiscussionUnlink),
+                ),
+              )
+            else if (current.commentsEnabled != null)
+              ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: Text(l10n.channelDiscussionGroup),
+                subtitle: Text(l10n.channelDiscussionNone),
+                trailing: TextButton(
+                  onPressed: () => _link(context, ref),
+                  child: Text(l10n.channelDiscussionLink),
                 ),
               ),
             if (current.isBroadcast != null)
@@ -104,6 +118,72 @@ class ChatSettingsScreen extends ConsumerWidget {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(error.message)));
       }
+    }
+  }
+
+  /// Links a group to this channel so readers can comment.
+  ///
+  /// The group is chosen from the ones this person already administers: a
+  /// channel's comments land in a real conversation somebody has to moderate,
+  /// so it cannot be an arbitrary chat id typed in.
+  Future<void> _link(BuildContext context, WidgetRef ref) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    final List<DiscoverableChat> candidates;
+    try {
+      candidates = await ref.read(groupsRepositoryProvider).discover(
+            type: 'group',
+            query: '',
+          );
+    } on ApiException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+    if (!context.mounted) {
+      return;
+    }
+
+    final String? groupId = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: candidates.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(l10n.channelDiscussionNoGroups),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: <Widget>[
+                  for (final DiscoverableChat chat in candidates)
+                    ListTile(
+                      leading: const Icon(Icons.group_outlined),
+                      title: Text(chat.title),
+                      subtitle: Text(l10n.groupsMembers(chat.memberCount)),
+                      onTap: () => Navigator.of(context).pop(chat.chatId),
+                    ),
+                ],
+              ),
+      ),
+    );
+    if (groupId == null || !context.mounted) {
+      return;
+    }
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(commentsRepositoryProvider)
+          .linkDiscussion(chatId, groupId);
+      ref.invalidate(chatSettingsProvider(chatId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
     }
   }
 
@@ -152,6 +232,24 @@ class ChatSettingsScreen extends ConsumerWidget {
     controller.dispose();
     if (slug == null || !context.mounted) {
       return;
+    }
+
+    // A slug is typed by hand, so a typo used to be stored as the group's set
+    // and simply produced no stickers — indistinguishable from a set that had
+    // none. Checking it exists first turns that into an answer.
+    if (slug.isNotEmpty) {
+      final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+      try {
+        await ref.read(stickersRepositoryProvider).bySlug(slug);
+      } on ApiException {
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.groupStickerSetUnknown(slug))),
+        );
+        return;
+      }
+      if (!context.mounted) {
+        return;
+      }
     }
     // An empty string clears the set, which is why it is not treated as a
     // cancelled edit.

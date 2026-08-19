@@ -7,6 +7,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../groups/data/groups_repository.dart';
 import '../data/communities_repository.dart';
 
 /// The communities the user belongs to (§16).
@@ -115,6 +116,14 @@ class CommunityScreen extends ConsumerWidget {
                     child: Text(l10n.groupsJoin),
                   ),
                 ),
+              // Removing a room was built and adding one was not, so a
+              // community could only ever shrink.
+              if (data.canArrange)
+                ListTile(
+                  leading: const Icon(Icons.add),
+                  title: Text(l10n.communitiesAddRoom),
+                  onTap: () => _addRoom(context, ref, communityId, data),
+                ),
               for (final MapEntry<String, List<CommunityRoom>> section
                   in data.roomsBySection.entries) ...<Widget>[
                 Padding(
@@ -171,6 +180,83 @@ class CommunityScreen extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  /// Files an existing group or channel under this community.
+  ///
+  /// Chosen from what the person can already administer: adding a room is
+  /// arranging chats that exist, not creating one, and a community that could
+  /// adopt any chat by id would be a way to claim somebody else's.
+  Future<void> _addRoom(
+    BuildContext context,
+    WidgetRef ref,
+    String communityId,
+    Community community,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final Set<String> already =
+        community.rooms.map((CommunityRoom r) => r.chatId).toSet();
+
+    final List<DiscoverableChat> candidates;
+    try {
+      candidates = await ref.read(groupsRepositoryProvider).discover();
+    } on ApiException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+    if (!context.mounted) {
+      return;
+    }
+
+    final List<DiscoverableChat> available = candidates
+        .where((DiscoverableChat c) => !already.contains(c.chatId))
+        .toList();
+
+    final String? chatId = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: available.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.all(SobhSpacing.lg),
+                child: Text(l10n.communitiesNothingToAdd),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: <Widget>[
+                  for (final DiscoverableChat chat in available)
+                    ListTile(
+                      leading: Icon(
+                        chat.type == 'channel'
+                            ? Icons.campaign_outlined
+                            : Icons.forum_outlined,
+                      ),
+                      title: Text(chat.title),
+                      onTap: () => Navigator.of(context).pop(chat.chatId),
+                    ),
+                ],
+              ),
+      ),
+    );
+    if (chatId == null || !context.mounted) {
+      return;
+    }
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(communitiesRepositoryProvider)
+          .addRoom(communityId, chatId);
+      ref.invalidate(communityProvider(communityId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
   }
 
   /// Unfiles a room from the community.

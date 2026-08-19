@@ -79,11 +79,18 @@ class ChatInfoScreen extends ConsumerWidget {
                 onTap: () => _clearHistory(context, ref, chatId, canAdminister),
               ),
               if (canAdminister) ...<Widget>[
+                // Turning topics on was offered and turning them off was
+                // not, so the decision was one-way: a group that became a
+                // forum by mistake stayed one.
                 ListTile(
                   leading: const Icon(Icons.dynamic_feed_outlined),
                   title: Text(l10n.topicsEnable),
                   subtitle: Text(l10n.topicsEnableBody),
                   onTap: () => _enableForum(context, ref, chatId),
+                  trailing: TextButton(
+                    onPressed: () => _disableForum(context, ref, chatId),
+                    child: Text(l10n.topicsDisable),
+                  ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.tune),
@@ -237,9 +244,27 @@ class _MemberActions extends ConsumerWidget {
       onSelected: (String action) => switch (action) {
         'remove' => _remove(context, ref),
         'bundle' => _assignBundle(context, ref),
+        'promote' => _setRole(context, ref, 'admin'),
+        'demote' => _setRole(context, ref, 'member'),
         _ => _transfer(context, ref),
       },
       itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        // Promoting somebody was not possible from the app at all: the client
+        // existed and nothing called it, so every administrator had to be made
+        // by editing the database.
+        PopupMenuItem<String>(
+          value: member.isAdmin ? 'demote' : 'promote',
+          child: ListTile(
+            leading: Icon(
+              member.isAdmin
+                  ? Icons.remove_moderator_outlined
+                  : Icons.add_moderator_outlined,
+            ),
+            title: Text(
+              member.isAdmin ? l10n.groupsDemote : l10n.groupsPromote,
+            ),
+          ),
+        ),
         PopupMenuItem<String>(
           value: 'bundle',
           child: ListTile(
@@ -264,6 +289,32 @@ class _MemberActions extends ConsumerWidget {
           ),
       ],
     );
+  }
+
+  /// Promotes a member to administrator, or puts them back.
+  ///
+  /// The server checks rank as well: nobody may promote someone to a standing
+  /// at or above their own, which is what stops an administrator being made by
+  /// someone they administer.
+  Future<void> _setRole(
+    BuildContext context,
+    WidgetRef ref,
+    String role,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(groupsRepositoryProvider)
+          .setRole(chatId, member.userId, role);
+      ref.invalidate(chatMembersProvider(chatId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
   }
 
   Future<void> _remove(BuildContext context, WidgetRef ref) async {
@@ -626,6 +677,52 @@ Future<void> _clearHistory(
 /// It is confirmed because it changes how every message in the group is
 /// addressed: the existing history is filed under General and new messages
 /// have to name a topic or land there.
+/// Turns topics back off.
+///
+/// Confirmed, and worded so it is clear nothing is lost: the server files the
+/// existing history back into the ordinary conversation rather than deleting
+/// what was said inside each topic.
+Future<void> _disableForum(
+  BuildContext context,
+  WidgetRef ref,
+  String chatId,
+) async {
+  final AppLocalizations l10n = AppLocalizations.of(context);
+  final bool confirmed = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: Text(l10n.topicsDisable),
+          content: Text(l10n.topicsDisableBody),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.commonCancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.topicsDisable),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+  if (!confirmed || !context.mounted) {
+    return;
+  }
+
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  try {
+    await ref.read(topicsRepositoryProvider).disableForum(chatId);
+    ref.invalidate(forumTopicsProvider(chatId));
+  } on ApiException catch (error) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+      ),
+    );
+  }
+}
+
 Future<void> _enableForum(
   BuildContext context,
   WidgetRef ref,

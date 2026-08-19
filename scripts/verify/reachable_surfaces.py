@@ -718,6 +718,91 @@ check("the banner endpoint answers", status == 200, f"{status} {body}")
 check("no breaking story is an answer, not an error",
       "article" in data_of(body), str(data_of(body)))
 
+# ------------------------------------------- what the app can now reach
+
+section("the clients that existed and nothing called")
+
+# Promoting somebody was impossible from the app: the client was there and no
+# screen used it, so every administrator had to be made in the database.
+promo = make_chat(alice_token, "group", "ارتقا", member_ids=[bob_id])
+status, _ = call("PUT", f"/chats/{promo}/members/{bob_id}/role", alice_token,
+                 {"role": "admin"})
+check("a member can be promoted", status in (200, 204), f"got {status}")
+status, body = call("GET", f"/chats/{promo}/members", alice_token)
+roles = {m["user_id"]: m["role"] for m in (data_of(body).get("members") or [])}
+check("and the role sticks", roles.get(bob_id) == "admin", str(roles))
+status, _ = call("PUT", f"/chats/{promo}/members/{bob_id}/role", alice_token,
+                 {"role": "member"})
+check("and can be taken back", status in (200, 204), f"got {status}")
+
+# Linking a discussion group was the half that did not exist; unlinking did.
+disc_channel = make_chat(alice_token, "channel", "کانال نظر")
+disc_group = make_chat(alice_token, "group", "گروه نظر")
+status, body = call("POST", f"/chats/{disc_channel}/discussion", alice_token,
+                    {"group_chat_id": disc_group})
+check("a discussion group can be linked", status in (200, 204),
+      f"{status} {body}")
+status, body = call("GET", f"/chats/{disc_channel}/settings", alice_token)
+check("the channel reports it",
+      data_of(body).get("discussion_chat_id") == disc_group,
+      str(data_of(body).get("discussion_chat_id")))
+
+# Adding a room, the other half of last pass's removal.
+status, body = call("POST", "/communities", alice_token,
+                    {"title": "انجمن", "is_public": False})
+community = data_of(body).get("id")
+if community:
+    room = make_chat(alice_token, "group", "اتاق")
+    status, _ = call("POST", f"/communities/{community}/rooms", alice_token,
+                     {"chat_id": room, "section": "general"})
+    check("a room can be added to a community", status in (200, 201, 204),
+          f"got {status}")
+    status, body = call("GET", f"/communities/{community}", alice_token)
+    rooms = [r.get("chat_id") for r in (data_of(body).get("rooms") or [])]
+    check("and it is in the community", room in rooms, str(rooms))
+
+# Following a category, which is what the `following` feed mode reads — a mode
+# that could only ever have been empty.
+status, body = call("GET", "/news/categories?locale=fa", alice_token)
+cats = data_of(body).get("categories") or []
+# A silent skip here would leave the check looking green while testing nothing,
+# which is the failure this probe's own history is full of.
+check("there is a category to follow", len(cats) > 0, f"{status} {body}")
+if cats:
+    status, _ = call("PUT", "/news-reader/follows", alice_token,
+                     {"category_id": cats[0]["id"], "follow": True})
+    check("a category can be followed", status in (200, 204), f"got {status}")
+    status, body = call("GET", "/news?mode=following&locale=fa", alice_token)
+    check("the following feed answers", status == 200, f"{status} {body}")
+
+# An exact handle went through fuzzy search and could rank below near-misses.
+wanted = "probe" + secrets.token_hex(3)
+status, body = call("PUT", "/users/me/username", alice_token,
+                    {"username": wanted})
+handle = data_of(body).get("username") or (wanted if status == 200 else None)
+check("a username can be claimed", handle is not None, f"{status} {body}")
+if handle:
+    status, body = call("GET", f"/users/by-username/{handle}", alice_token)
+    check("an account can be found by its exact handle", status == 200,
+          f"{status} {body}")
+    check("and it is the right one",
+          data_of(body).get("user_id") == alice_id, str(data_of(body)))
+status, _ = call("GET", "/users/by-username/definitely-not-a-handle",
+                 alice_token)
+check("an unknown handle is a 404, not a guess", status == 404, f"got {status}")
+
+# Turning topics off, the other half of turning them on.
+offable = make_chat(alice_token, "group", "خاموش‌شدنی")
+call("POST", f"/chats/{offable}/forum", alice_token)
+status, _ = call("DELETE", f"/chats/{offable}/forum", alice_token)
+check("a forum can be turned back off", status in (200, 204), f"got {status}")
+
+# The badge nothing ever fetched.
+status, body = call("GET", "/notifications/unread-count", alice_token)
+check("the unread count can be read", status == 200, f"{status} {body}")
+check("and it is a number",
+      isinstance(data_of(body).get("unread_count"), int), str(data_of(body)))
+
 # ------------------------------------------------- the refused sign-in, last
 
 section("a refused code reaches the sign-in history")

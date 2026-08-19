@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/settings/settings_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
@@ -152,11 +153,18 @@ class _FeedControls extends ConsumerWidget {
             data: (List<NewsCategory> rows) => <Widget>[
               const SizedBox(width: SobhSpacing.sm),
               for (final NewsCategory category in rows) ...<Widget>[
-                FilterChip(
-                  label: Text(category.name),
-                  selected: categoryId == category.id,
-                  onSelected: (bool selected) =>
-                      onCategoryChanged(selected ? category.id : null),
+                // Long-pressing follows the category, which is what the
+                // `following` feed mode reads. Following was in the
+                // repository and reachable from nowhere, so that mode was a
+                // list that could only ever be empty.
+                GestureDetector(
+                  onLongPress: () => _toggleFollow(context, ref, category),
+                  child: FilterChip(
+                    label: Text(category.name),
+                    selected: categoryId == category.id,
+                    onSelected: (bool selected) =>
+                        onCategoryChanged(selected ? category.id : null),
+                  ),
                 ),
                 const SizedBox(width: SobhSpacing.sm),
               ],
@@ -260,6 +268,60 @@ class BookmarksScreen extends ConsumerWidget {
                 itemBuilder: (BuildContext context, int index) =>
                     ArticleTile(article: articles[index]),
               ),
+      ),
+    );
+  }
+}
+
+/// Follows or unfollows a category, and says which it did.
+///
+/// The server holds one row per follow, so there is nothing to read back
+/// before deciding — the switch is in the confirmation, not in the chip, which
+/// keeps the chip meaning "filter by this" and nothing else.
+Future<void> _toggleFollow(
+  BuildContext context,
+  WidgetRef ref,
+  NewsCategory category,
+) async {
+  final AppLocalizations l10n = AppLocalizations.of(context);
+  final bool? follow = await showModalBottomSheet<bool>(
+    context: context,
+    builder: (BuildContext context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: Text(l10n.newsFollowCategory(category.name)),
+            onTap: () => Navigator.of(context).pop(true),
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications_off_outlined),
+            title: Text(l10n.newsUnfollowCategory(category.name)),
+            onTap: () => Navigator.of(context).pop(false),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (follow == null || !context.mounted) {
+    return;
+  }
+
+  final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+  try {
+    await ref
+        .read(newsRepositoryProvider)
+        .setFollow(categoryId: category.id, following: follow);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(follow ? l10n.newsFollowed : l10n.newsUnfollowed),
+      ),
+    );
+  } on ApiException catch (error) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(error.isOffline ? l10n.errorNetwork : error.message),
       ),
     );
   }

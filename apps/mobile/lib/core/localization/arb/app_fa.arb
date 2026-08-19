@@ -763,5 +763,63 @@
         "type": "int"
       }
     }
-  }
+  },
+  "inlineAsking": "در حال پرسیدن از بات…",
+  "groupsPromote": "ارتقا به مدیر",
+  "groupsDemote": "برداشتن مدیریت",
+  "channelDiscussionNone": "گروهی وصل نشده",
+  "channelDiscussionLink": "وصل‌کردن گروه",
+  "channelDiscussionNoGroups": "گروهی که مدیرش باشید پیدا نشد. نظرها در گروهی می‌نشیند که کسی باید مدیریتش کند.",
+  "communitiesAddRoom": "افزودن اتاق",
+  "communitiesNothingToAdd": "گفتگویی برای افزودن نمانده — همه‌شان از قبل در این انجمن‌اند.",
+  "newsFollowed": "دنبال شد",
+  "newsUnfollowed": "دنبال‌کردن لغو شد",
+  "newsFollowCategory": "دنبال‌کردن «{name}»",
+  "@newsFollowCategory": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "newsUnfollowCategory": "لغو دنبال‌کردن «{name}»",
+  "@newsUnfollowCategory": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "searchNoSuchUsername": "حسابی با نشانی {username} پیدا نشد",
+  "@searchNoSuchUsername": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "groupStickerSetUnknown": "استیکرستی با شناسهٔ «{slug}» وجود ندارد",
+  "@groupStickerSetUnknown": {
+    "placeholders": {
+      "slug": {
+        "type": "String"
+      }
+    }
+  },
+  "botsCommands": "دستورها",
+  "botsCommandsEdit": "ویرایش دستورها",
+  "botsCommandsHelp": "فهرستی که هنگام تایپ «/» در گفتگو با این بات پیشنهاد می‌شود",
+  "botsCommandsFormat": "هر خط یک دستور: ‎/نام — توضیح. خط‌هایی که این شکل را ندارند نادیده گرفته می‌شوند.",
+  "botsCommandsSaved": "{count, plural, =0{همهٔ دستورها برداشته شد} other{{count} دستور ذخیره شد}}",
+  "@botsCommandsSaved": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "foldersAlwaysInclude": "همیشه در این پوشه",
+  "foldersAlwaysExclude": "هرگز در این پوشه",
+  "foldersFollowRules": "پیروی از قاعده‌های پوشه",
+  "topicsDisableBody": "موضوع‌ها خاموش می‌شوند و آنچه در هرکدام گفته شده به گفتگوی معمولی بازمی‌گردد؛ چیزی حذف نمی‌شود."
 }

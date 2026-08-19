@@ -26,6 +26,7 @@ import '../data/chat_repository.dart';
 import '../data/inbound_sync.dart';
 import '../data/live_location_controller.dart';
 import '../data/organise_repository.dart';
+import 'inline_results_strip.dart';
 import 'location_sheet.dart';
 import 'message_actions.dart';
 import 'message_content.dart';
@@ -76,6 +77,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Timer? _typingStopTimer;
 
   Timer? _draftSaveTimer;
+
+  /// A snapshot of the compose box, so the inline strip is a plain widget
+  /// taking a string rather than reaching into a controller.
+  String _composerText = '';
 
   /// What the server was last told, so an unchanged box does not keep sending
   /// the same string — including the empty one, on every chat that is opened
@@ -132,6 +137,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _onComposerChanged() {
     _typingStopTimer?.cancel();
     _scheduleDraftSave();
+    // The inline strip reads this rather than the controller, so it rebuilds
+    // when the text changes rather than on every controller notification.
+    if (_composerText != _composer.text) {
+      setState(() => _composerText = _composer.text);
+    }
 
     if (_composer.text.trim().isEmpty) {
       _setTyping(false);
@@ -667,6 +677,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
           ),
           if (_uploading != null) _UploadBar(progress: _uploading!),
+          // `@bot query` in the compose box asks that bot for things to send.
+          // The strip decides for itself whether what is typed is a query, so
+          // the composer does not have to know about inline mode at all.
+          InlineResultsStrip(
+            chatId: widget.chatId,
+            text: _composerText,
+            onChosen: () {
+              _composer.clear();
+              _draftSaveTimer?.cancel();
+              _savedDraft = '';
+              unawaited(
+                ref.read(chatRepositoryProvider).saveDraft(widget.chatId, ''),
+              );
+            },
+          ),
           _Composer(
             controller: _composer,
             onSend: _send,

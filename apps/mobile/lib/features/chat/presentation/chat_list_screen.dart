@@ -148,7 +148,13 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
                     separatorBuilder: (_, __) =>
                         const Divider(indent: SobhSpacing.xxl + SobhSpacing.lg),
                     itemBuilder: (BuildContext context, int index) =>
-                        _ChatTile(chat: rows[index]),
+                        _ChatTile(
+                      chat: rows[index],
+                      // Only inside a folder: pinning a chat into one, or
+                      // keeping it out, is a statement about that folder and
+                      // means nothing on the main list.
+                      folderId: ref.watch(selectedFolderProvider),
+                    ),
                   ),
                 );
               },
@@ -160,8 +166,11 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   }
 }
 
-class _ChatTile extends StatelessWidget {
-  const _ChatTile({required this.chat});
+class _ChatTile extends ConsumerWidget {
+  const _ChatTile({required this.chat, this.folderId});
+
+  /// The folder being shown, when one is. Null on the main list.
+  final String? folderId;
 
   final ChatRow chat;
 
@@ -204,13 +213,74 @@ class _ChatTile extends StatelessWidget {
     context.go('/chats/${chat.id}');
   }
 
+  /// Pins this chat into the folder, keeps it out, or drops the override.
+  Future<void> _folderOverride(
+    BuildContext context,
+    WidgetRef ref,
+    String folder,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final String? mode = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.push_pin_outlined),
+              title: Text(l10n.foldersAlwaysInclude),
+              onTap: () => Navigator.of(context).pop('include'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.block),
+              title: Text(l10n.foldersAlwaysExclude),
+              onTap: () => Navigator.of(context).pop('exclude'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.restart_alt),
+              title: Text(l10n.foldersFollowRules),
+              onTap: () => Navigator.of(context).pop('clear'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (mode == null || !context.mounted) {
+      return;
+    }
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      final FoldersRepository folders = ref.read(foldersRepositoryProvider);
+      if (mode == 'clear') {
+        await folders.removeChat(folder, chat.id);
+      } else {
+        await folders.setChat(folder, chat.id, mode);
+      }
+      ref.invalidate(folderChatIdsProvider(folder));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final SobhPalette palette = SobhTheme.of(context);
     final TextTheme text = Theme.of(context).textTheme;
     final String name = _name;
 
     return ListTile(
+      // Inside a folder, holding a chat pins it in or keeps it out — the
+      // per-chat override the folder rules would otherwise decide. The client
+      // for it existed and nothing called it, so a folder was rules with no
+      // exceptions.
+      onLongPress: folderId == null
+          ? null
+          : () => _folderOverride(context, ref, folderId!),
       onTap: () => _open(context),
       leading: CircleAvatar(
         radius: SobhSizes.avatarMedium / 2,

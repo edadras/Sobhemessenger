@@ -8,7 +8,9 @@ import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../chat/data/chat_repository.dart';
 import '../../groups/presentation/join_by_link_screen.dart';
+import '../../profile/data/profile_repository.dart';
 import '../data/search_repository.dart';
 
 /// Global search (§28).
@@ -68,7 +70,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
         ],
       ),
-      body: _query.isEmpty
+      body: _query.startsWith('@') && _query.length > 1
+          // A leading @ is somebody naming one exact account, not searching.
+          // Looking a username up was in the repository and reachable from
+          // nowhere, so an exact handle went through the fuzzy search and
+          // could come back below three near-misses.
+          ? _ByUsername(username: _query)
+          : _query.isEmpty
           ? ListView(
               children: <Widget>[
                 // An invite link arrives as a message somewhere else, so the
@@ -188,6 +196,60 @@ class _Section extends StatelessWidget {
                 : () => context.go('/chats/${result.chatId}'),
           ),
       ],
+    );
+  }
+}
+
+/// One account, looked up by its exact handle.
+class _ByUsername extends ConsumerWidget {
+  const _ByUsername({required this.username});
+
+  final String username;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    return FutureBuilder<UserProfile>(
+      future: ref.read(profileRepositoryProvider).byUsername(username),
+      builder: (BuildContext context, AsyncSnapshot<UserProfile> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SobhLoading();
+        }
+        // No such handle is the ordinary answer to a guess, not a failure:
+        // most of what somebody types after an @ is not an account.
+        if (snapshot.hasError || snapshot.data == null) {
+          return SobhEmptyState(
+            icon: Icons.person_off_outlined,
+            title: l10n.searchNoSuchUsername(username),
+          );
+        }
+
+        final UserProfile user = snapshot.data!;
+        return ListView(
+          children: <Widget>[
+            ListTile(
+              leading: SobhAvatar(name: user.displayName),
+              title: Text(user.displayName),
+              subtitle:
+                  user.username == null ? null : Text('@${user.username}'),
+              // Straight into a conversation with them, which is what
+              // somebody typing an exact handle is after. There is no
+              // stand-alone profile screen for another account, and inventing
+              // one here would be a second place to maintain what the chat
+              // header already shows.
+              onTap: () async {
+                final String chatId = await ref
+                    .read(chatRepositoryProvider)
+                    .openPrivateChat(user.userId);
+                if (context.mounted) {
+                  context.go('/chats/$chatId');
+                }
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

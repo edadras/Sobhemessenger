@@ -155,7 +155,7 @@ tests.
 | **Messaging** | Chats and membership, permissions with per-member overrides, send/edit/delete/react/read, drafts that follow you between devices without a refresh overwriting one in progress, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows, clearing a conversation for yourself or for both sides, and chat folders as saved filters. |
 | **Realtime** | WebSocket with authenticated handshake, protocol versioning, heartbeats, ack correlation, resume-from-cursor, slow-consumer eviction, cross-node routing, presence. |
 | **Media** | Resumable presigned multipart uploads, magic-byte validation against the declared MIME, ClamAV scanning, image variants with BlurHash, ffmpeg video renditions and posters, Opus normalisation and waveforms for voice. |
-| **Groups & channels** | Creation, named role bundles resolved between the chat's defaults and a member's own overrides, ownership transfer, rank-checked member administration, invite links with limits and expiry that can be redeemed as well as issued, join requests, distinct-viewer counting, per-post statistics, public directory, forum topics that open as conversations of their own with per-topic reading and unread counts, channel post signatures, and comments as replies in a linked discussion group. |
+| **Groups & channels** | Creation, named role bundles resolved between the chat's defaults and a member's own overrides, ownership transfer, promotion and demotion with rank checks, invite links with limits and expiry that can be redeemed as well as issued, join requests, distinct-viewer counting, per-post statistics, public directory, forum topics that open as conversations of their own with per-topic reading and unread counts, channel post signatures, and comments as replies in a linked discussion group. |
 | **Communities** | Rooms grouped into sections, starter rooms on creation, membership cascading into default rooms. |
 | **Stories & polls** | Privacy scopes evaluated per viewer in SQL with deny-list override, views, reactions, close friends with an editable list, 24-hour expiry; polls with single/multiple choice, quizzes, anonymity that is never lifted afterwards, a named voter list when it is not anonymous, and transactional vote replacement. |
 | **Calls** | WebRTC signalling that relays SDP and ICE without parsing them, one session row per leg recording what it negotiated and the network it was on, participant lifecycle, media state, ephemeral HMAC TURN credentials. |
@@ -272,7 +272,7 @@ real PostgreSQL, and documented in `protocol/rest/openapi.yaml`:
 | Location messages | Fixed points, venues, and live location that updates the message rather than posting a movement log. The device keeps a share moving for as long as it runs — across a restart, since closing the app is not ending the share — and the sender can stop it before its deadline |
 | Contact messages | Name and one number, picked from the address book — not the whole record |
 | Inline keyboards | Buttons under a bot's message, and the taps they produce |
-| Inline mode | `@bot query` from any chat's compose box, without the bot joining it |
+| Inline mode | `@bot query` from any chat's compose box, without the bot joining it — the results appear above the composer and the chosen one is sent by the person, not the bot |
 
 Scheduling turned out to be the interesting one. Migration 0004 had reserved
 `messages.scheduled_at`, but `messages.seq` is `NOT NULL` and a seq-less row

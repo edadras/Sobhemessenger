@@ -189,6 +189,18 @@ class _BotDetail extends ConsumerWidget {
           ),
         ),
         const Divider(),
+        // The command list a client offers when somebody types "/" in a chat
+        // with this bot. Setting it was in the repository and reachable from
+        // nowhere, so the only way an owner could advertise a command was
+        // through BotFather's conversation.
+        _SectionHeader(title: l10n.botsCommands),
+        ListTile(
+          leading: const Icon(Icons.terminal),
+          title: Text(l10n.botsCommandsEdit),
+          subtitle: Text(l10n.botsCommandsHelp),
+          onTap: () => _editCommands(context, ref, bot),
+        ),
+        const Divider(),
         _SectionHeader(title: l10n.botsWebhook),
         webhook.when(
           loading: () => const Padding(
@@ -302,6 +314,105 @@ class _BotDetail extends ConsumerWidget {
       }
     } finally {
       label.dispose();
+    }
+  }
+
+  /// Edits the commands this bot advertises.
+  ///
+  /// One line per command, `/name — what it does`, because that is how the
+  /// list reads to whoever types "/" in a chat with the bot, and a form with a
+  /// row of paired fields would be more machinery than the thing deserves.
+  Future<void> _editCommands(
+    BuildContext context,
+    WidgetRef ref,
+    Bot bot,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    // Read first, so the editor opens on what the bot advertises now rather
+    // than on an empty box that would silently replace the lot on save.
+    final List<BotCommand> existing;
+    try {
+      existing = await ref.read(botsRepositoryProvider).commands(bot.userId);
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+    if (!context.mounted) {
+      return;
+    }
+
+    final TextEditingController controller = TextEditingController(
+      text: existing
+          .map((BotCommand c) => '/${c.command} — ${c.description}')
+          .join('\n'),
+    );
+
+    final String? edited = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(l10n.botsCommandsEdit),
+        content: SizedBox(
+          width: 420,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 8,
+            decoration: InputDecoration(
+              helperText: l10n.botsCommandsFormat,
+              helperMaxLines: 2,
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n.commonCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(l10n.commonSave),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (edited == null || !context.mounted) {
+      return;
+    }
+
+    // Lines that are not a command are dropped rather than refused: somebody
+    // leaving a blank line or a stray note between entries meant the list, not
+    // an error.
+    final List<BotCommand> commands = <BotCommand>[];
+    for (final String line in edited.split('\n')) {
+      final RegExpMatch? match =
+          RegExp(r'^\s*/?([a-z0-9_]{1,32})\s*[—:-]?\s*(.*)$').firstMatch(line);
+      if (match == null) {
+        continue;
+      }
+      commands.add(
+        BotCommand(
+          command: match.group(1)!,
+          description: match.group(2)!.trim(),
+          position: commands.length,
+        ),
+      );
+    }
+
+    try {
+      await ref.read(botsRepositoryProvider).setCommands(bot.userId, commands);
+      ref.invalidate(botListProvider);
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.botsCommandsSaved(commands.length))),
+      );
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
     }
   }
 

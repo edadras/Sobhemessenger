@@ -541,3 +541,10 @@ final FutureProvider<DataRights> dataRightsProvider =
     FutureProvider<DataRights>(
   (Ref ref) => ref.watch(accountRepositoryProvider).dataRequests(),
 );
+
+/// How many notifications are waiting that are not messages — a story, a
+/// contact request, a news alert. The count was fetched by nothing, so nothing
+/// ever said they had arrived.
+final FutureProvider<int> unreadNotificationsProvider = FutureProvider<int>(
+  (Ref ref) => ref.watch(accountRepositoryProvider).unreadNotificationCount(),
+);

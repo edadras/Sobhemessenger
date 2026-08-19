@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../groups/presentation/create_chat_screen.dart';
 import '../../search/presentation/search_screen.dart';
+import '../../settings/data/account_repository.dart';
 
 /// The destinations of the app, in the order they appear (§45).
 ///
@@ -17,15 +19,20 @@ enum HomeTab { chats, contacts, news, calls, profile }
 /// It wraps a StatefulShellRoute branch so each tab keeps its own navigation
 /// stack: opening an article and switching to Chats and back must return to
 /// the article, not to the top of the feed.
-class HomeShell extends StatelessWidget {
+class HomeShell extends ConsumerWidget {
   const HomeShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final HomeTab current = HomeTab.values[navigationShell.currentIndex];
+
+    // Zero while it is loading or if it fails: a badge is a nudge, and one
+    // that appears on a network error would be an alert about nothing.
+    final int unread =
+        ref.watch(unreadNotificationsProvider).valueOrNull ?? 0;
 
     return Scaffold(
       body: navigationShell,
@@ -67,7 +74,15 @@ class HomeShell extends StatelessWidget {
             label: l10n.navCalls,
           ),
           NavigationDestination(
-            icon: const Icon(Icons.person_outline),
+            // Notifications that are not messages — a story, a contact
+            // request, a news alert — land under the profile tab, and the
+            // count was fetched by nothing, so nothing ever said they had
+            // arrived.
+            icon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text('$unread'),
+              child: const Icon(Icons.person_outline),
+            ),
             selectedIcon: const Icon(Icons.person),
             label: l10n.navProfile,
           ),

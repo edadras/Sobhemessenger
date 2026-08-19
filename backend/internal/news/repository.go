@@ -116,7 +116,10 @@ func (r *Repository) Categories(ctx context.Context, locale string, includeInact
 	}
 	defer rows.Close()
 
-	var categories []Category
+	// Empty rather than nil: a deployment with no categories yet answers
+	// with a list, and the reader's feed does not have to tell an absent
+	// field from an empty one.
+	categories := []Category{}
 	for rows.Next() {
 		var category Category
 		if err := rows.Scan(&category.ID, &category.Slug, &category.ParentID,

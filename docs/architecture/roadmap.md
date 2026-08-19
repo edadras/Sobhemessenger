@@ -60,6 +60,7 @@ A feature is complete only when all of the following hold:
 | 34 | Named role bundles, read receipts, call sessions (§14, §7, §20) | done: a bundle resolved between the chat's defaults and a member's overrides, who has read one message, and one signalling row per participant so a reconnect does not start from nothing |
 | 35 | Article galleries and translations (§25) | done: an ordered gallery and a per-locale translation that is a draft until someone signs it off |
 | 36 | Clients for the surfaces nothing called | done: the sign-in log, close friends, live location updates, channel statistics, ownership transfer, editorial authors and spam scores — see below |
+| 39 | The clients nothing called | done: inline mode, promoting a member, linking a discussion group, adding a community room, following a news category, looking up an exact handle, validating a sticker-set slug, editing a bot's commands, per-chat folder overrides, turning a forum off, and the unread badge |
 | 38 | The last five | done: setting the two-step password, drafts that follow you between devices, reading one forum topic on its own, the breaking-news banner, and a past call's negotiation record |
 | 37 | The rest of the unreachable surfaces | done: redeeming an invite link, counting a channel post's views, data export and account deletion, the recovery flow itself, poll voters, secret-session records, community room removal, bans, operator roles, search reindexing, news categories, and the network a call leg is on |
 
@@ -133,6 +134,30 @@ a sentence in progress. The rule that resolves both: the server's draft fills
 an empty box and never overwrites a full one. That is what lets a sentence
 started on the desktop turn up on the phone, and it is the one piece of this
 work with enough judgement in it to be worth a test of its own.
+
+A fourth pass changed the question being asked, and that is what found the
+rest. "Does this path appear in the Dart source?" proves a repository method
+exists; it says nothing about whether a screen calls it. Asking "is this method
+ever invoked?" turned up twelve clients that were written, compiled and reached
+by nothing.
+
+The largest was inline mode. `openQuery`, `results` and `choose` were all
+there, complete, and no screen touched any of them — so a feature this file
+called done had no way in, and typing `@somebot pizza` left the text sitting in
+the box. Promoting a member was the same: the client existed, nothing called
+it, and every administrator therefore had to be made by editing the database.
+Linking a channel to a discussion group was missing while unlinking was
+present, so comments could only ever be switched off; adding a room to a
+community was missing while removing one was present, so a community could only
+shrink. Following a news category was unreachable, which made the `following`
+feed a list that could only ever be empty.
+
+Two smaller ones are worth recording because they are the same shape as the
+bugs above. The group sticker-set field took a slug typed by hand and never
+checked it existed, so a typo was stored and simply produced no stickers —
+indistinguishable from a set that had none. And the unread notification count
+was fetched by nothing, so a story, a contact request or a news alert arrived
+with nothing to say so.
 
 `scripts/verify/reachable_surfaces.py` is the probe that asks these questions
 from the client's side, and it is where all of them came from.
