@@ -706,7 +706,9 @@ func (r *Repository) PostStats(ctx context.Context, chatID uuid.UUID, messageIDs
 	}
 	defer rows.Close()
 
-	var stats []PostStats
+	// Empty rather than nil, so a channel whose posts nobody has opened yet
+	// answers with a list rather than with `null`.
+	stats := []PostStats{}
 	for rows.Next() {
 		var s PostStats
 		if err := rows.Scan(&s.MessageID, &s.ViewCount, &s.ForwardCount,

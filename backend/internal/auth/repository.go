@@ -502,13 +502,18 @@ func (r *Repository) RecordLogin(ctx context.Context, userID uuid.UUID, event, i
 	return err
 }
 
+// LoginRecord is one entry in the sign-in log shown on the security screen.
+//
+// The tags are not decoration: this is a response body, and without them the
+// endpoint answered in Go field names while every other response in the API
+// is snake_case.
 type LoginRecord struct {
-	Event     string
-	IP        *string
-	UserAgent string
-	Platform  string
-	Succeeded bool
-	CreatedAt time.Time
+	Event     string    `json:"event"`
+	IP        *string   `json:"ip,omitempty"`
+	UserAgent string    `json:"user_agent"`
+	Platform  string    `json:"platform"`
+	Succeeded bool      `json:"succeeded"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (r *Repository) LoginHistory(ctx context.Context, userID uuid.UUID, limit int) ([]LoginRecord, error) {

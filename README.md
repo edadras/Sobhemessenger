@@ -148,14 +148,14 @@ tests.
 
 | Area | What exists |
 |---|---|
-| **Database** | 97 domain tables covering every area of the specification, plus the migration ledger. 16 migrations with working `down` steps, verified by applying and reverting all of them against a live PostgreSQL — 98 tables to 1 and back. |
+| **Database** | 97 domain tables covering every area of the specification, plus the migration ledger. 18 migrations with working `down` steps, verified by applying and reverting all of them against a live PostgreSQL — 98 tables to 1 and back. |
 | **Backend foundation** | Config from environment with production validation, structured logging with redaction, PostgreSQL pool with transaction helpers, Redis, NATS JetStream, MinIO, OpenSearch, Prometheus metrics, health/readiness probes, migration runner with checksums and advisory locking. |
 | **HTTP layer** | Single response envelope, ~60 stable error codes, request id, real-IP resolution behind trusted proxies, security headers, CORS, per-route metrics, panic recovery, timeouts. |
 | **Authentication** | OTP with sliding-window limits that fail closed, phone normalisation (E.164, Persian and Arabic digits), JWT with key rotation, refresh-token rotation with replay detection, two-step verification, session and device management, login history. |
 | **Messaging** | Chats and membership, permissions with per-member overrides, send/edit/delete/react/read/draft, per-chat sequences, per-user event log, unread and mention counters, slow mode, edit windows, clearing a conversation for yourself or for both sides, and chat folders as saved filters. |
 | **Realtime** | WebSocket with authenticated handshake, protocol versioning, heartbeats, ack correlation, resume-from-cursor, slow-consumer eviction, cross-node routing, presence. |
 | **Media** | Resumable presigned multipart uploads, magic-byte validation against the declared MIME, ClamAV scanning, image variants with BlurHash, ffmpeg video renditions and posters, Opus normalisation and waveforms for voice. |
-| **Groups & channels** | Creation, roles with per-member overrides, ownership transfer, rank-checked member administration, invite links with limits and expiry, join requests, distinct-viewer counting, per-post statistics, public directory, forum topics with per-topic reading, channel post signatures, and comments as replies in a linked discussion group. |
+| **Groups & channels** | Creation, named role bundles resolved between the chat's defaults and a member's own overrides, ownership transfer, rank-checked member administration, invite links with limits and expiry, join requests, distinct-viewer counting, per-post statistics, public directory, forum topics with per-topic reading, channel post signatures, and comments as replies in a linked discussion group. |
 | **Communities** | Rooms grouped into sections, starter rooms on creation, membership cascading into default rooms. |
 | **Stories & polls** | Privacy scopes evaluated per viewer in SQL with deny-list override, views, reactions, close friends, 24-hour expiry; polls with single/multiple choice, quizzes, anonymity and transactional vote replacement. |
 | **Calls** | WebRTC signalling that relays SDP and ICE without parsing them, participant lifecycle, media state, ephemeral HMAC TURN credentials. |
@@ -269,7 +269,7 @@ real PostgreSQL, and documented in `protocol/rest/openapi.yaml`:
 | Profile editing | Partial updates with rune-counted limits |
 | Archived and muted chats | Per member, so archiving a group does not archive it for everyone |
 | Link previews | OpenGraph unfurling behind the SSRF guard, with a shared cache that also caches failures |
-| Location messages | Fixed points, venues, and live location that updates the message rather than posting a movement log |
+| Location messages | Fixed points, venues, and live location that updates the message rather than posting a movement log. The device keeps a share moving for as long as it runs — across a restart, since closing the app is not ending the share — and the sender can stop it before its deadline |
 | Contact messages | Name and one number, picked from the address book — not the whole record |
 | Inline keyboards | Buttons under a bot's message, and the taps they produce |
 | Inline mode | `@bot query` from any chat's compose box, without the bot joining it |

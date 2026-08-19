@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/admin_api.dart';
 import '../../../main.dart';
 import '../../flags/presentation/flags_page.dart';
+import '../../news/presentation/authors_page.dart';
 import '../../news/presentation/editorial_page.dart';
 import '../../reports/presentation/reports_page.dart';
 import '../../users/presentation/users_page.dart';
@@ -32,6 +33,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
     _Section('کاربران', Icons.people_outline, Icons.people),
     _Section('گزارش‌ها', Icons.flag_outlined, Icons.flag),
     _Section('اخبار', Icons.article_outlined, Icons.article),
+    _Section('نویسندگان', Icons.badge_outlined, Icons.badge),
     _Section('قابلیت‌ها', Icons.toggle_on_outlined, Icons.toggle_on),
   ];
 
@@ -90,6 +92,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         1 => const UsersPage(),
         2 => const ReportsPage(),
         3 => const EditorialPage(),
+        4 => const AuthorsPage(),
         _ => const FlagsPage(),
       };
 }

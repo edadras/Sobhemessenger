@@ -57,6 +57,46 @@ A feature is complete only when all of the following hold:
 | 31 | Contact requests (§54) | done: send, accept, reject, withdraw, with blocking and privacy giving one refusal |
 | 32 | Anti-spam scoring (§34) | done: weighted signals, a lapsing restriction narrowed to cold outreach, decay in the worker |
 | 33 | Email account recovery (§4) | done: a recovery address that does nothing until it is verified, and clears the two-step password with every session |
+| 34 | Named role bundles, read receipts, call sessions (§14, §7, §20) | done: a bundle resolved between the chat's defaults and a member's overrides, who has read one message, and one signalling row per participant so a reconnect does not start from nothing |
+| 35 | Article galleries and translations (§25) | done: an ordered gallery and a per-locale translation that is a draft until someone signs it off |
+| 36 | Clients for the surfaces nothing called | done: the sign-in log, close friends, live location updates, channel statistics, ownership transfer, editorial authors and spam scores — see below |
+
+## The endpoints nothing called
+
+Seven endpoints were served, documented, covered by tests, and reached by no
+application. That is harder to notice than a broken endpoint, because
+everything about it looks healthy — it compiles, it has a route, its handler is
+tested. What it does not have is a caller, so nothing has ever checked that the
+answer is a shape a client could use.
+
+`GET /auth/login-history` was answering in Go field names — `Event`,
+`UserAgent`, `Succeeded` — while every other response in the API is snake_case.
+An app reading it would have got nulls where it cast unconditionally, which on
+the phone is a crash rather than an error it can show. It also recorded only
+successful sign-ins, so the screen it exists to fill would have shown a clean
+history while somebody was working through codes against the account.
+
+Live location was the largest of them. The app could *start* a share, and then
+never sent a single update or offered any way to stop one: a pin that sits
+where it was first dropped while the message claims to be live is worse than
+not having the feature, because the person waiting for you believes it. The
+device now keeps every running share moving, reads them back from its own
+database so one survives the app being closed, and treats the server's "that
+share is over" as final.
+
+Two more were found by driving the new clients against a live server rather
+than by reading the code. Assigning a role belonging to another chat was
+refused in the sense that mattered — the permissions were not granted — but it
+was refused by computing the new value from a scoped subquery, which wrote NULL
+and reported success: the refusal silently took away whatever role the member
+already held. The integration test for that case asserted the call *succeeded*
+and had no effect, which is exactly how the second half stayed invisible. And
+`EnsureBotFather` failed when BotFather already existed, because a lookup and
+an `ON CONFLICT DO NOTHING ... RETURNING` are not one atomic step — two API
+nodes starting together is the ordinary case, not a rare one.
+
+`scripts/verify/reachable_surfaces.py` is the probe that asks these questions
+from the client's side, and it is where the first and the last two came from.
 
 ## Secret chats (§24)
 

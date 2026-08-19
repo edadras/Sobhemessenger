@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart';
@@ -365,6 +366,7 @@ class LocalDatabase extends _$LocalDatabase {
     required String serverId,
     required int seq,
     required DateTime createdAt,
+    String? payloadJson,
   }) async {
     await transaction(() async {
       await (update(messages)
@@ -377,6 +379,14 @@ class LocalDatabase extends _$LocalDatabase {
           seq: Value<int>(seq),
           createdAt: Value<DateTime>(createdAt),
           status: const Value<MessageStatus>(MessageStatus.sent),
+          // The server completes some payloads — a live location comes back
+          // with the deadline it computed, which the device could not know.
+          // Keeping the sent version would leave a share that renders as
+          // already over. Absent when the server sent nothing, so the column
+          // is left alone rather than nulled.
+          payloadJson: payloadJson == null
+              ? const Value<String>.absent()
+              : Value<String>(payloadJson),
         ),
       );
       await (delete(outbox)
@@ -442,6 +452,49 @@ class LocalDatabase extends _$LocalDatabase {
         cursor: Value<int>(cursor),
         lastSyncedAt: Value<DateTime>(DateTime.now()),
       ),
+    );
+  }
+
+  /// Every location message this device holds that is still being shared.
+  ///
+  /// Confirmed messages only: a share still in the outbox has no server id to
+  /// move yet, and it will be picked up on the next pass once it has one.
+  Future<List<MessageRow>> liveLocationMessages() {
+    return (select(messages)
+          ..where(
+            ($MessagesTable t) =>
+                t.type.equals('location') &
+                t.deletedAt.isNull() &
+                t.payloadJson.isNotNull() &
+                t.status.equalsValue(MessageStatus.sent),
+          ))
+        .get();
+  }
+
+  /// Marks a share as finished in the local copy.
+  ///
+  /// The row keeps its last point — the conversation should still show where
+  /// the person was — but stops claiming to be live, which is what the server
+  /// does when sharing ends.
+  Future<void> endLiveLocation(String messageId) async {
+    final MessageRow? row = await (select(messages)
+          ..where(($MessagesTable t) => t.id.equals(messageId))
+          ..limit(1))
+        .getSingleOrNull();
+    final String? raw = row?.payloadJson;
+    if (raw == null) {
+      return;
+    }
+
+    final Object? decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) {
+      return;
+    }
+    decoded['live_until'] = DateTime.now().toUtc().toIso8601String();
+
+    await (update(messages)..where(($MessagesTable t) => t.id.equals(messageId)))
+        .write(
+      MessagesCompanion(payloadJson: Value<String>(jsonEncode(decoded))),
     );
   }
 

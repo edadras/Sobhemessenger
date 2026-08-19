@@ -274,7 +274,10 @@ func (r *Repository) CloseFriends(ctx context.Context, ownerID uuid.UUID) ([]uui
 	}
 	defer rows.Close()
 
-	var ids []uuid.UUID
+	// Started empty rather than nil: a nil slice marshals to `null`, and a
+	// client that has to tell "no close friends" from "the field is missing"
+	// is being asked a question the API should have answered.
+	ids := []uuid.UUID{}
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {

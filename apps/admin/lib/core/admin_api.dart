@@ -100,6 +100,110 @@ class AdminApi {
         <String, String>{'status': status},
       );
 
+  // ------------------------------------------------------------- newsroom
+
+  Future<List<dynamic>> authors() async {
+    final Map<String, dynamic> data =
+        await _get<Map<String, dynamic>>('/editorial/authors');
+    return data['authors'] as List<dynamic>? ?? const <dynamic>[];
+  }
+
+  /// Creates an author, or edits one when [id] is supplied.
+  ///
+  /// A byline is not the same thing as an account: a wire service or a desk
+  /// has no user to attach, so [userId] is optional.
+  Future<void> saveAuthor({
+    required String displayName,
+    String? id,
+    String? userId,
+    String bio = '',
+    bool isActive = true,
+  }) =>
+      _send('/editorial/authors', 'PUT', <String, dynamic>{
+        if (id != null) 'id': id,
+        if (userId != null) 'user_id': userId,
+        'display_name': displayName,
+        'bio': bio,
+        'is_active': isActive,
+      });
+
+  Future<List<dynamic>> articleGallery(String articleId) async {
+    final Map<String, dynamic> data = await _get<Map<String, dynamic>>(
+      '/editorial/articles/$articleId/gallery',
+    );
+    return data['items'] as List<dynamic>? ?? const <dynamic>[];
+  }
+
+  /// Replaces the whole gallery, which is what the endpoint does: the order of
+  /// the list is the order of the images, so sending a subset would delete the
+  /// rest rather than leave them in place.
+  Future<void> replaceGallery(
+    String articleId,
+    List<Map<String, dynamic>> items,
+  ) =>
+      _send(
+        '/editorial/articles/$articleId/gallery',
+        'PUT',
+        <String, dynamic>{'items': items},
+      );
+
+  Future<List<dynamic>> translations(String articleId) async {
+    final Map<String, dynamic> data = await _get<Map<String, dynamic>>(
+      '/editorial/articles/$articleId/translations',
+    );
+    return data['translations'] as List<dynamic>? ?? const <dynamic>[];
+  }
+
+  Future<void> saveTranslation(
+    String articleId,
+    String locale, {
+    required String title,
+    String subtitle = '',
+    String body = '',
+    String source = 'human',
+  }) =>
+      _send(
+        '/editorial/articles/$articleId/translations/$locale',
+        'PUT',
+        <String, dynamic>{
+          'title': title,
+          'subtitle': subtitle,
+          'body': body,
+          'source': source,
+        },
+      );
+
+  /// Signs off a translation.
+  ///
+  /// A machine translation nobody has read is not the same thing as a
+  /// translated article, and this is the difference between the two.
+  Future<void> approveTranslation(String articleId, String locale) => _send(
+        '/editorial/articles/$articleId/translations/$locale/approve',
+        'POST',
+        const <String, dynamic>{},
+      );
+
+  Future<void> deleteTranslation(String articleId, String locale) => _send(
+        '/editorial/articles/$articleId/translations/$locale',
+        'DELETE',
+        const <String, dynamic>{},
+      );
+
+  // ------------------------------------------------------------- anti-spam
+
+  /// The spam score held against one account.
+  ///
+  /// An account with no score is not an error — it is the ordinary state of
+  /// almost everyone — so the server answers with an empty score rather than a
+  /// 404, and this returns it unchanged.
+  Future<Map<String, dynamic>> spamScore(String userId) =>
+      _get<Map<String, dynamic>>('/admin/spam-scores/$userId');
+
+  /// Lifts a restriction. Moderation is auditable server-side, so nothing is
+  /// recorded here beyond making the call.
+  Future<void> liftSpamScore(String userId) =>
+      _send('/admin/spam-scores/$userId', 'DELETE', const <String, dynamic>{});
+
   Future<T> _get<T>(String path) async {
     final Response<dynamic> response =
         await _dio.get<dynamic>(path, options: _options);

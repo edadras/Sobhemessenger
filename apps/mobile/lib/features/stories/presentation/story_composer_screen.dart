@@ -9,6 +9,7 @@ import '../../../core/theme/design_tokens.dart';
 import '../../media/data/media_repository.dart';
 import '../../media/presentation/attachment_picker.dart';
 import '../data/stories_repository.dart';
+import 'close_friends_screen.dart';
 
 /// The background colours offered for a text story.
 ///
@@ -235,6 +236,19 @@ class _StoryComposerScreenState extends ConsumerState<StoryComposerScreen> {
                     ),
                   ],
                 ),
+                // The option was already offered, with no way to say who is on
+                // the list. Choosing an audience the user cannot see or change
+                // is not a privacy setting.
+                if (_privacy == 'close_friends')
+                  IconButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const CloseFriendsScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.group_outlined),
+                    tooltip: l10n.storiesCloseFriendsEdit,
+                  ),
               ],
             ),
           ),

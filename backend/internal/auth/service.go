@@ -212,6 +212,17 @@ func (s *Service) VerifyOTP(ctx context.Context, in VerifyOTPInput) (*TokenPair,
 			s.logger.Error("failed to record OTP attempt", slog.Any("error", burnErr))
 		}
 		s.metrics.AuthAttempts.WithLabelValues("otp_verify", "wrong_code").Inc()
+		// A wrong code against an existing account is the entry the security
+		// screen exists to show — someone is trying to get in and has not
+		// managed it yet. Recording only the successes would leave the owner
+		// looking at a clean history while it was happening.
+		//
+		// A phone with no account records nothing: there is no one to show it
+		// to, and writing it would need a row with no owner.
+		if existing, lookupErr := s.repo.UserByPhone(ctx, phone); lookupErr == nil && existing != nil {
+			_ = s.repo.RecordLogin(ctx, existing.ID, "otp_failed",
+				in.IP, in.UserAgent, in.Platform, false)
+		}
 		if attempts >= challenge.MaxAttempts {
 			return nil, httpx.Unauthorized(httpx.CodeOTPAttemptsBurned,
 				"Too many incorrect attempts, request a new code")

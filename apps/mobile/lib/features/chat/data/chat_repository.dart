@@ -213,6 +213,23 @@ class ChatRepository {
     await _db.markMessageDeleted(messageId);
   }
 
+  /// Who has read one message, newest first (§7).
+  ///
+  /// The chat list only needs a cursor — how far each person has read — and
+  /// that is what the local database keeps. This is the other question, asked
+  /// only when someone opens the detail for a single message, so it is a
+  /// request rather than something synced for every message on screen.
+  Future<List<MessageRead>> readReceipts(String messageId) async {
+    final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
+      '/messages/$messageId/reads',
+    );
+    return <MessageRead>[
+      for (final dynamic entry
+          in data['reads'] as List<dynamic>? ?? const <dynamic>[])
+        MessageRead.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
   /// Adds or removes a reaction. The server decides which, since tapping the
   /// same emoji twice removes it; the response says what happened.
   Future<bool> react(String messageId, String emoji) async {
@@ -375,6 +392,7 @@ class ChatRepository {
           'message_id': message['id'],
           'seq': message['seq'],
           'created_at': message['created_at'],
+          if (message['payload'] != null) 'payload': message['payload'],
         });
       }
     } on ApiException catch (error) {
@@ -395,6 +413,7 @@ class ChatRepository {
       serverId: ack['message_id'] as String,
       seq: (ack['seq'] as num).toInt(),
       createdAt: DateTime.parse(ack['created_at'] as String).toUtc(),
+      payloadJson: ack['payload'] == null ? null : jsonEncode(ack['payload']),
     );
   }
 
@@ -455,4 +474,40 @@ final StreamProviderFamily<List<MessageRow>, String> chatMessagesProvider =
     StreamProvider.family<List<MessageRow>, String>(
   (Ref ref, String chatId) =>
       ref.watch(chatRepositoryProvider).watchMessages(chatId),
+);
+
+/// One person who has read a message, and when.
+class MessageRead {
+  const MessageRead({
+    required this.userId,
+    required this.displayName,
+    required this.readAt,
+  });
+
+  factory MessageRead.fromJson(Map<String, dynamic> json) => MessageRead(
+        userId: json['user_id'] as String,
+        displayName: json['display_name'] as String? ?? '',
+        readAt: DateTime.parse(json['read_at'] as String).toLocal(),
+      );
+
+  final String userId;
+  final String displayName;
+  final DateTime readAt;
+}
+
+final FutureProviderFamily<List<MessageRead>, String> messageReadsProvider =
+    FutureProvider.family<List<MessageRead>, String>(
+  (Ref ref, String messageId) =>
+      ref.watch(chatRepositoryProvider).readReceipts(messageId),
+);
+
+/// One chat as this device holds it, or null if it has never been synced.
+///
+/// Screens that need the chat's *kind* — a group behaves differently from a
+/// channel — read it from here rather than being handed a string by whichever
+/// screen pushed them, which was how a channel-only action ended up offered
+/// in groups.
+final FutureProviderFamily<ChatRow?, String> chatRowProvider =
+    FutureProvider.family<ChatRow?, String>(
+  (Ref ref, String chatId) => ref.watch(localDatabaseProvider).chatById(chatId),
 );

@@ -173,23 +173,44 @@ func (r *Repository) DeleteRole(ctx context.Context, chatID, roleID uuid.UUID) e
 
 // AssignRole hands a bundle to a member, or takes it away when roleID is nil.
 func (r *Repository) AssignRole(ctx context.Context, chatID, userID uuid.UUID, roleID *uuid.UUID) error {
-	// The role has to belong to this chat. Without the subquery, an id from
+	// The role has to belong to this chat. Without the check, an id from
 	// another chat would be accepted by the foreign key and quietly grant that
 	// chat's permissions here.
+	//
+	// It guards the WHERE rather than the SET. Computing the new value from a
+	// scoped subquery also blocks the grant, but it does so by writing NULL —
+	// so a refused assignment silently *removed* whatever role the member
+	// already held, and reported success. A refusal has to leave things as
+	// they were.
 	tag, err := r.db.Pool.Exec(ctx, `
 		UPDATE chat_members
-		SET custom_role_id = (
-		    SELECT id FROM group_roles WHERE id = $3 AND chat_id = $1
-		)
-		WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL`,
+		SET custom_role_id = $3
+		WHERE chat_id = $1 AND user_id = $2 AND left_at IS NULL
+		  AND ($3::uuid IS NULL
+		       OR EXISTS (SELECT 1 FROM group_roles
+		                   WHERE id = $3::uuid AND chat_id = $1))`,
 		chatID, userID, roleID)
 	if err != nil {
 		return fmt.Errorf("groups: assign role: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotMember
+	if tag.RowsAffected() > 0 {
+		return nil
 	}
-	return nil
+
+	// Nothing was updated, which means either the person is not a member or
+	// the role is not this chat's. The caller needs to be told which.
+	if roleID != nil {
+		var exists bool
+		if err := r.db.Pool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM group_roles WHERE id = $1 AND chat_id = $2)`,
+			*roleID, chatID).Scan(&exists); err != nil {
+			return fmt.Errorf("groups: assign role: %w", err)
+		}
+		if !exists {
+			return ErrRoleNotFound
+		}
+	}
+	return ErrNotMember
 }
 
 // permissionsJSON stores an empty map as an empty object rather than null, so
@@ -323,10 +344,17 @@ func (s *Service) AssignRole(ctx context.Context, chatID, targetID, actorID uuid
 	}
 
 	if err := s.repo.AssignRole(ctx, chatID, targetID, roleID); err != nil {
-		if errors.Is(err, ErrNotMember) {
+		switch {
+		case errors.Is(err, ErrNotMember):
 			return httpx.NotFound(httpx.CodeNotFound, "That user is not a member")
+		case errors.Is(err, ErrRoleNotFound):
+			// Including a role that exists but belongs to another chat. Naming
+			// it as "not this chat's" would confirm to an outsider that the id
+			// is a real role somewhere.
+			return httpx.NotFound(httpx.CodeNotFound, "That is not a role in this chat")
+		default:
+			return httpx.Internal(err)
 		}
-		return httpx.Internal(err)
 	}
 	return nil
 }

@@ -23,6 +23,7 @@ import '../../polls/presentation/poll_widgets.dart';
 import '../../stickers/presentation/sticker_picker.dart';
 import '../data/chat_repository.dart';
 import '../data/inbound_sync.dart';
+import '../data/live_location_controller.dart';
 import '../data/organise_repository.dart';
 import 'location_sheet.dart';
 import 'message_actions.dart';
@@ -371,6 +372,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             type: 'location',
             payload: location.toPayload(),
           );
+      if (location.isLive) {
+        // Starting the share is only half of it: something has to keep sending
+        // positions for as long as it runs, or the pin stays where it was.
+        await ref.read(liveLocationControllerProvider).start();
+      }
+    } on ApiException catch (error) {
+      _tell(error.isOffline ? l10n.errorNetwork : error.message);
+    }
+  }
+
+  /// Ends a live share the user started, before its deadline.
+  Future<void> _stopSharingLocation(String messageId) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    try {
+      await ref.read(liveLocationControllerProvider).stopSharing(messageId);
     } on ApiException catch (error) {
       _tell(error.isOffline ? l10n.errorNetwork : error.message);
     }
@@ -548,6 +564,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       message: message,
                       isOutgoing: message.senderId == null ||
                           message.senderId == currentUserId,
+                      onStopSharingLocation: _stopSharingLocation,
                     ),
                   );
                 },
@@ -606,10 +623,19 @@ class _UploadBar extends StatelessWidget {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.isOutgoing});
+  const _MessageBubble({
+    required this.message,
+    required this.isOutgoing,
+    required this.onStopSharingLocation,
+  });
 
   final MessageRow message;
   final bool isOutgoing;
+
+  /// Ending a live share is the screen's business — it has to talk to the
+  /// controller and report a refusal — so the bubble only says when it was
+  /// asked for.
+  final Future<void> Function(String messageId) onStopSharingLocation;
 
   /// The attachments stored alongside the message, as media ids with captions.
   List<({String mediaId, String caption})> get _attachments {
@@ -676,8 +702,17 @@ class _MessageBubble extends StatelessWidget {
               // instead: whatever it carried is gone.
               if (!isDeleted &&
                   message.type == 'location' &&
-                  message.payloadJson != null)
+                  message.payloadJson != null) ...<Widget>[
                 LocationBubble(payloadJson: message.payloadJson!),
+                // Only the sender can end a share, and only while it is
+                // running — so this is the one place the button belongs.
+                if (isOutgoing && isLiveLocation(message.payloadJson!))
+                  TextButton.icon(
+                    onPressed: () => onStopSharingLocation(message.id),
+                    icon: const Icon(Icons.location_off_outlined),
+                    label: Text(l10n.locationLiveStop),
+                  ),
+              ],
               if (!isDeleted &&
                   message.type == 'contact' &&
                   message.payloadJson != null)

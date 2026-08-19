@@ -579,10 +579,18 @@ func (s *Service) EnsureBotFather(ctx context.Context) (uuid.UUID, error) {
 	err := s.repo.db.InTx(ctx, func(tx pgx.Tx) error {
 		// The account has no phone anybody can sign in with: it is not a person
 		// and must not be reachable by the ordinary login path.
+		// DO UPDATE rather than DO NOTHING: the lookup above and this insert are
+		// not one atomic step, so a second process that provisioned BotFather
+		// in between would leave DO NOTHING returning no rows — and "ensure"
+		// would fail precisely because the thing it ensures already exists.
+		// Two API nodes starting together is the ordinary case, not a rare one.
+		// The update is a no-op write of the same values; it exists to make the
+		// statement return the row.
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO users (phone_number, phone_hash, username, is_bot)
 			VALUES ($1, $2, $3, TRUE)
-			ON CONFLICT (phone_number) DO NOTHING
+			ON CONFLICT (phone_number) DO UPDATE
+			SET username = EXCLUDED.username, is_bot = TRUE
 			RETURNING id`,
 			"bot:"+BotFatherUsername,
 			[]byte("botfather:"+BotFatherUsername),

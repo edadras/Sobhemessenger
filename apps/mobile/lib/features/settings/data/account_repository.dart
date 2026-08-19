@@ -132,6 +132,39 @@ class NotificationSettings {
       };
 }
 
+/// One entry in the sign-in log (§56).
+///
+/// Both halves matter. A successful sign-in from a place the owner does not
+/// recognise is the first sign of a stolen code; a run of failures is the
+/// first sign of someone trying to guess one. Showing only the successes
+/// would hide the attempt that has not worked yet.
+class LoginEvent {
+  const LoginEvent({
+    required this.event,
+    required this.platform,
+    required this.succeeded,
+    required this.createdAt,
+    this.userAgent = '',
+    this.ip,
+  });
+
+  factory LoginEvent.fromJson(Map<String, dynamic> json) => LoginEvent(
+        event: json['event'] as String? ?? '',
+        platform: json['platform'] as String? ?? '',
+        succeeded: json['succeeded'] as bool? ?? false,
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+        userAgent: json['user_agent'] as String? ?? '',
+        ip: json['ip'] as String?,
+      );
+
+  final String event;
+  final String platform;
+  final bool succeeded;
+  final DateTime createdAt;
+  final String userAgent;
+  final String? ip;
+}
+
 /// Devices, sessions and notification settings.
 class AccountRepository {
   AccountRepository(this._api);
@@ -208,6 +241,17 @@ class AccountRepository {
     final Map<String, dynamic> data =
         await _api.get<Map<String, dynamic>>('/notifications/unread-count');
     return (data['unread_count'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Recent sign-in attempts on this account, newest first.
+  Future<List<LoginEvent>> loginHistory() async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/auth/login-history');
+    return <LoginEvent>[
+      for (final dynamic entry
+          in data['history'] as List<dynamic>? ?? const <dynamic>[])
+        LoginEvent.fromJson(entry as Map<String, dynamic>),
+    ];
   }
 
   // -------------------------------------------------------- email recovery
@@ -336,4 +380,9 @@ final FutureProvider<NotificationSettings> notificationSettingsProvider =
 final FutureProvider<RecoveryEmail> recoveryEmailProvider =
     FutureProvider<RecoveryEmail>(
   (Ref ref) => ref.watch(accountRepositoryProvider).recoveryEmail(),
+);
+
+final FutureProvider<List<LoginEvent>> loginHistoryProvider =
+    FutureProvider<List<LoginEvent>>(
+  (Ref ref) => ref.watch(accountRepositoryProvider).loginHistory(),
 );

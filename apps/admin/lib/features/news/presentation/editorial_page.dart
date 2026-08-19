@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/admin_api.dart';
 import '../../../main.dart';
 import '../../dashboard/presentation/admin_shell.dart';
+import 'article_detail_page.dart';
 
 /// The newsroom queue (§25).
 class EditorialPage extends ConsumerStatefulWidget {
@@ -92,6 +93,17 @@ class _EditorialPageState extends ConsumerState<EditorialPage> {
                       '${article['category_name'] ?? 'بدون دسته'} · '
                       '${article['author_name'] ?? 'بدون نویسنده'} · '
                       '${article['reading_minutes']} دقیقه',
+                    ),
+                    // The gallery and the translations belong to the article,
+                    // so they are behind the article rather than in a section
+                    // of their own where they would have to be searched for.
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ArticleDetailPage(
+                          articleId: article['id'] as String,
+                          title: article['title'] as String? ?? '—',
+                        ),
+                      ),
                     ),
                     trailing: _actionsFor(article),
                   );

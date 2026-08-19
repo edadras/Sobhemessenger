@@ -302,8 +302,41 @@ paths:
     get:
       tags: [Authentication]
       summary: Recent sign-in activity
+      description: >
+        The 50 most recent attempts, newest first — refused ones included.
+        A wrong code against an existing account is the entry this exists to
+        show; a log of successes only would look clean while somebody was
+        working through codes.
       responses:
-        "200": { description: Login history }
+        "200":
+          description: Sign-in attempts, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          history:
+                            type: array
+                            items:
+                              type: object
+                              required: [event, platform, succeeded, created_at]
+                              properties:
+                                event:
+                                  type: string
+                                  description: >
+                                    What was attempted — `login`, `otp_failed`,
+                                    `two_step_failed`.
+                                platform: { type: string }
+                                user_agent: { type: string }
+                                ip:
+                                  type: string
+                                  description: Absent when it was not recorded.
+                                succeeded: { type: boolean }
+                                created_at: { type: string, format: date-time }
 
   /api/v1/auth/recovery/email:
     get:

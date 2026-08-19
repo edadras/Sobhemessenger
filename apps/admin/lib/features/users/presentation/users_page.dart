@@ -51,6 +51,55 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     }
   }
 
+  /// Shows the anti-spam score held against an account, and offers to lift it.
+  ///
+  /// The score is what silently restricts someone before any moderator has
+  /// looked at them, so an account that "cannot send messages for no reason"
+  /// is answered here rather than by guessing. Lifting is a moderation write
+  /// and is refused for an operator without the permission.
+  Future<void> _showSpamScore(Map<String, dynamic> user) async {
+    final AdminApi api = ref.read(adminApiProvider);
+    final String userId = user['id'] as String;
+
+    final Map<String, dynamic> result;
+    try {
+      result = await api.spamScore(userId);
+    } on AdminApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    final bool lift = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => _SpamScoreDialog(
+            name: user['display_name'] as String? ?? userId,
+            result: result,
+          ),
+        ) ??
+        false;
+    if (!lift) {
+      return;
+    }
+
+    try {
+      await api.liftSpamScore(userId);
+      if (mounted) {
+        _reload();
+      }
+    } on AdminApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final AdminApi api = ref.watch(adminApiProvider);
@@ -114,6 +163,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     user: user,
                     onChangeStatus: (String status) =>
                         _changeStatus(user['id'] as String, status),
+                    onShowSpamScore: () => _showSpamScore(user),
                   );
                 },
               ),
@@ -126,10 +176,15 @@ class _UsersPageState extends ConsumerState<UsersPage> {
 }
 
 class _UserRow extends StatelessWidget {
-  const _UserRow({required this.user, required this.onChangeStatus});
+  const _UserRow({
+    required this.user,
+    required this.onChangeStatus,
+    required this.onShowSpamScore,
+  });
 
   final Map<String, dynamic> user;
   final void Function(String status) onChangeStatus;
+  final VoidCallback onShowSpamScore;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +226,11 @@ class _UserRow extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           _StatusChip(status: status),
+          IconButton(
+            onPressed: onShowSpamScore,
+            icon: const Icon(Icons.report_gmailerrorred_outlined),
+            tooltip: 'امتیاز ضدهرزنامه',
+          ),
           const SizedBox(width: 8),
           PopupMenuButton<String>(
             onSelected: onChangeStatus,
@@ -258,6 +318,69 @@ class _ReasonDialogState extends State<_ReasonDialog> {
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('تأیید'),
         ),
+      ],
+    );
+  }
+}
+
+/// What the anti-spam system holds against one account.
+///
+/// The threshold is shown next to the score because a number on its own says
+/// nothing: 40 means very different things depending on where the line is, and
+/// the operator should not have to remember it.
+class _SpamScoreDialog extends StatelessWidget {
+  const _SpamScoreDialog({required this.name, required this.result});
+
+  final String name;
+  final Map<String, dynamic> result;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Map<String, dynamic> score =
+        result['score'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    final bool restricted = result['restricted'] as bool? ?? false;
+    final int threshold = (result['threshold'] as num?)?.toInt() ?? 0;
+    final int value = (score['score'] as num?)?.toInt() ?? 0;
+    final String reason = score['reason'] as String? ?? '';
+    final String? until = score['restricted_until'] as String?;
+
+    return AlertDialog(
+      title: Text('امتیاز ضدهرزنامه — $name'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('امتیاز: $value از آستانهٔ $threshold'),
+          const SizedBox(height: 8),
+          Text(
+            restricted ? 'این حساب هم‌اکنون محدود است' : 'محدودیتی در کار نیست',
+            style: TextStyle(
+              color: restricted ? colors.error : colors.primary,
+            ),
+          ),
+          if (until != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text('تا: $until'),
+          ],
+          if (reason.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text('دلیل: $reason'),
+          ],
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('بستن'),
+        ),
+        // Offered only when there is something to lift. A button that does
+        // nothing on an unrestricted account teaches the operator to ignore it.
+        if (restricted || value > 0)
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('برداشتن محدودیت'),
+          ),
       ],
     );
   }

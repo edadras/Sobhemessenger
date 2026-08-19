@@ -6,11 +6,15 @@ import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../auth/session_controller.dart';
+import '../../chat/data/chat_repository.dart';
 import '../../chat/data/organise_repository.dart';
 import '../../chat/data/topics_repository.dart';
 import '../../chat/presentation/topics_screen.dart';
 import '../data/groups_repository.dart';
+import 'channel_statistics_screen.dart';
 import 'chat_settings_screen.dart';
+import 'role_bundles_screen.dart';
 
 /// Members, invite links and join requests for one group or channel (§16).
 class ChatInfoScreen extends ConsumerWidget {
@@ -24,6 +28,9 @@ class ChatInfoScreen extends ConsumerWidget {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AsyncValue<List<Member>> members =
         ref.watch(chatMembersProvider(chatId));
+    final String? myUserId = ref.watch(sessionControllerProvider).userId;
+    final String chatType =
+        ref.watch(chatRowProvider(chatId)).valueOrNull?.type ?? 'group';
 
     return Scaffold(
       appBar: AppBar(title: Text(title.isEmpty ? l10n.groupsInfoTitle : title)),
@@ -37,7 +44,16 @@ class ChatInfoScreen extends ConsumerWidget {
           // Administration is only offered to someone who can actually perform
           // it; the server enforces the same rule, this just avoids showing
           // buttons that would be refused.
-          final bool canAdminister = rows.any((Member m) => m.isAdmin);
+          //
+          // It has to be *this* member's role. Asking whether the list
+          // contains any admin is a question with the answer "yes" in every
+          // group, which offered every member the administrator's controls and
+          // left the refusal to arrive as an error afterwards.
+          final Member? me = rows
+              .where((Member m) => m.userId == myUserId)
+              .firstOrNull;
+          final bool canAdminister = me?.isAdmin ?? false;
+          final bool isOwner = me?.isOwner ?? false;
 
           return ListView(
             children: <Widget>[
@@ -79,6 +95,31 @@ class ChatInfoScreen extends ConsumerWidget {
                   ),
                 ),
                 ListTile(
+                  leading: const Icon(Icons.badge_outlined),
+                  title: Text(l10n.rolesTitle),
+                  subtitle: Text(l10n.rolesSubtitle),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => RoleBundlesScreen(
+                        chatId: chatId,
+                        chatType: chatType,
+                      ),
+                    ),
+                  ),
+                ),
+                if (chatType == 'channel')
+                  ListTile(
+                    leading: const Icon(Icons.query_stats),
+                    title: Text(l10n.channelStatisticsTitle),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ChannelStatisticsScreen(
+                          chatId: chatId,
+                        ),
+                      ),
+                    ),
+                  ),
+                ListTile(
                   leading: const Icon(Icons.link),
                   title: Text(l10n.groupsInviteLink),
                   onTap: () => Navigator.of(context).push(
@@ -110,14 +151,11 @@ class ChatInfoScreen extends ConsumerWidget {
                     },
                   ),
                   trailing: canAdminister && !member.isOwner
-                      ? IconButton(
-                          icon: const Icon(Icons.person_remove_outlined),
-                          onPressed: () async {
-                            await ref
-                                .read(groupsRepositoryProvider)
-                                .removeMember(chatId, member.userId);
-                            ref.invalidate(chatMembersProvider(chatId));
-                          },
+                      ? _MemberActions(
+                          chatId: chatId,
+                          chatType: chatType,
+                          member: member,
+                          canTransferOwnership: isOwner,
                         )
                       : null,
                 ),
@@ -166,6 +204,206 @@ class ChatInfoScreen extends ConsumerWidget {
     await ref.read(groupsRepositoryProvider).leave(chatId);
     if (context.mounted) {
       context.go('/chats');
+    }
+  }
+}
+
+/// What an administrator can do to one member.
+///
+/// Collapsed into a menu rather than a row of icons: removing someone and
+/// handing them the chat are both one tap away otherwise, and they are not
+/// mistakes anyone recovers from quickly.
+class _MemberActions extends ConsumerWidget {
+  const _MemberActions({
+    required this.chatId,
+    required this.chatType,
+    required this.member,
+    required this.canTransferOwnership,
+  });
+
+  final String chatId;
+  final String chatType;
+  final Member member;
+
+  /// Only the current owner may hand the chat over, so only they are offered
+  /// it. The server checks the same thing.
+  final bool canTransferOwnership;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    return PopupMenuButton<String>(
+      onSelected: (String action) => switch (action) {
+        'remove' => _remove(context, ref),
+        'bundle' => _assignBundle(context, ref),
+        _ => _transfer(context, ref),
+      },
+      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'bundle',
+          child: ListTile(
+            leading: const Icon(Icons.badge_outlined),
+            title: Text(l10n.rolesAssign),
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'remove',
+          child: ListTile(
+            leading: const Icon(Icons.person_remove_outlined),
+            title: Text(l10n.groupsRemoveMember),
+          ),
+        ),
+        if (canTransferOwnership)
+          PopupMenuItem<String>(
+            value: 'transfer',
+            child: ListTile(
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: Text(l10n.groupsTransferOwnership),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _remove(BuildContext context, WidgetRef ref) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(groupsRepositoryProvider)
+          .removeMember(chatId, member.userId);
+      ref.invalidate(chatMembersProvider(chatId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
+  }
+
+  /// Gives this member one of the chat's named bundles, or takes it away.
+  Future<void> _assignBundle(BuildContext context, WidgetRef ref) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final List<GroupRole> roles;
+    try {
+      roles = await ref.read(groupsRepositoryProvider).roles(chatId);
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+      return;
+    }
+    if (!context.mounted) {
+      return;
+    }
+
+    if (roles.isEmpty) {
+      // Offering an empty picker would look broken. Send them where bundles
+      // are made instead.
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => RoleBundlesScreen(chatId: chatId, chatType: chatType),
+        ),
+      );
+      return;
+    }
+
+    // The sentinel stands for "no bundle": null cannot be returned from the
+    // sheet and also mean "the user backed out".
+    const String none = '';
+    final String? chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.block),
+              title: Text(l10n.rolesNone),
+              onTap: () => Navigator.of(context).pop(none),
+            ),
+            const Divider(height: 1),
+            for (final GroupRole role in roles)
+              ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: Text(role.name),
+                onTap: () => Navigator.of(context).pop(role.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) {
+      return;
+    }
+
+    try {
+      await ref.read(groupsRepositoryProvider).assignRole(
+            chatId,
+            member.userId,
+            chosen == none ? null : chosen,
+          );
+      ref.invalidate(chatMembersProvider(chatId));
+      ref.invalidate(chatRolesProvider(chatId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
+  }
+
+  /// Hands the chat over. Confirmed by typing nothing clever — just a plain
+  /// dialog naming who is about to own it, because the caller loses their own
+  /// authority the moment it succeeds and cannot undo it from here.
+  Future<void> _transfer(BuildContext context, WidgetRef ref) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool confirmed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => AlertDialog(
+            title: Text(l10n.groupsTransferOwnership),
+            content: Text(
+              l10n.groupsTransferOwnershipConfirm(member.displayName),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.groupsTransferOwnershipConfirmAction),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !context.mounted) {
+      return;
+    }
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(groupsRepositoryProvider)
+          .transferOwnership(chatId, member.userId);
+      ref.invalidate(chatMembersProvider(chatId));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.groupsTransferOwnershipDone)),
+      );
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
     }
   }
 }

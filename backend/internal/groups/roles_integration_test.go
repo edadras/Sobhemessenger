@@ -2,10 +2,13 @@ package groups_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/sobh/messenger/backend/internal/httpx"
 	"github.com/sobh/messenger/backend/internal/messaging"
 )
 
@@ -222,17 +225,38 @@ func TestARoleFromAnotherChatCannotBeAssigned(t *testing.T) {
 		t.Fatalf("CreateRole: %v", err)
 	}
 
-	// The foreign key alone would accept this and quietly grant another
-	// chat's permissions here.
-	if err := h.service.AssignRole(ctx, here, member, owner, &foreign.ID); err != nil {
+	// Give the member a role of this chat first, so what happens to it can be
+	// observed. This is the case that matters: a refusal that also wipes an
+	// existing grant is a demotion nobody asked for.
+	local, err := h.service.CreateRole(ctx, here, owner, "Moderator",
+		map[string]bool{"pin_messages": true}, 10)
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	if err := h.service.AssignRole(ctx, here, member, owner, &local.ID); err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
+
+	// The foreign key alone would accept this and quietly grant another chat's
+	// permissions here. The scoping subquery stops the grant — but on its own
+	// it made the update write NULL and report success, so the caller was told
+	// the assignment worked while the member silently lost the role they had.
+	err = h.service.AssignRole(ctx, here, member, owner, &foreign.ID)
+	if err == nil {
+		t.Fatal("assigning another chat's role was accepted")
+	}
+	var apiErr *httpx.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
+		t.Fatalf("want a 404, got %v", err)
+	}
+
 	chatCtx, err := h.messaging.ChatContextFor(ctx, here, member)
 	if err != nil {
 		t.Fatalf("ChatContextFor: %v", err)
 	}
-	if chatCtx.Permissions.PinMessages || chatCtx.CustomRole != "" {
-		t.Error("a role belonging to another chat took effect")
+	if chatCtx.CustomRole != "Moderator" || !chatCtx.Permissions.PinMessages {
+		t.Errorf("the refusal took away the role the member already held: %q",
+			chatCtx.CustomRole)
 	}
 }
 

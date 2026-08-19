@@ -265,7 +265,7 @@ SKIP = {
 import yaml
 spec = yaml.safe_load(open("protocol/rest/openapi.yaml"))
 
-server_errors, client_errors, ok = [], [], 0
+server_errors, client_errors, unavailable, ok = [], [], [], 0
 for path, item in sorted(spec["paths"].items()):
     for method, op in item.items():
         if method not in ("get", "post", "put", "patch", "delete"):
@@ -285,14 +285,22 @@ for path, item in sorted(spec["paths"].items()):
             body = {}
         status, resp = call(M, concrete, A_TOK, body)
         line = f"{M:6} {path}"
-        if status >= 500 or status == 0:
+        code = (resp.get("error") or {}).get("code", "")
+        if status == 503 and code == "SERVICE_UNAVAILABLE":
+            # A feature this deployment has switched off — email recovery with
+            # no mail transport configured, say. The endpoint is not broken; it
+            # is declining to pretend it can do something the operator did not
+            # give it the means to do, which is the behaviour that was asked
+            # for. Every other 5xx is still a defect.
+            unavailable.append((line, status, json.dumps(resp, ensure_ascii=False)[:220]))
+        elif status >= 500 or status == 0:
             server_errors.append((line, status, json.dumps(resp, ensure_ascii=False)[:220]))
         elif status >= 400:
             client_errors.append((line, status, (resp.get("error") or {}).get("code", "")))
         else:
             ok += 1
 
-print(f"2xx/3xx: {ok}    4xx: {len(client_errors)}    5xx: {len(server_errors)}")
+print(f"2xx/3xx: {ok}    4xx: {len(client_errors)}    5xx: {len(server_errors)}    switched off: {len(unavailable)}")
 print()
 if server_errors:
     print("=" * 70)
@@ -300,6 +308,11 @@ if server_errors:
     print("=" * 70)
     for line, status, detail in server_errors:
         print(f"  {status}  {line}\n        {detail}")
+    print()
+if unavailable:
+    print("features this deployment has switched off (not defects):")
+    for line, status, detail in unavailable:
+        print(f"  {status}  {line}")
     print()
 print("4xx responses (usually the endpoint refusing input the probe could not build):")
 for line, status, code in client_errors:

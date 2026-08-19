@@ -22,6 +22,20 @@ import '../data/bot_interaction_repository.dart';
 
 /// A shared location, drawn as a card rather than a map.
 ///
+/// Whether a location payload is still being shared.
+///
+/// Shared with the chat screen, which needs the same answer to decide whether
+/// to offer "stop sharing" — asking it in two places with two rules would let
+/// the button and the bubble disagree about what the message is.
+bool isLiveLocation(String payloadJson) {
+  final Object? until = _decode(payloadJson)['live_until'];
+  if (until is! String) {
+    return false;
+  }
+  final DateTime? deadline = DateTime.tryParse(until)?.toLocal();
+  return deadline != null && deadline.isAfter(DateTime.now());
+}
+
 /// The coordinates open in whatever map application the device has, rather
 /// than the app embedding a map: that would mean shipping a tile provider's
 /// SDK and telling it where every user is, which is a lot to give away for a

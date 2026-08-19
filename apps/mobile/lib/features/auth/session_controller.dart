@@ -10,6 +10,7 @@ import '../../core/network/api_exception.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/storage/token_store.dart';
 import '../../core/websocket/socket_client.dart';
+import '../chat/data/live_location_controller.dart';
 import '../notifications/data/push_registration.dart';
 import '../secretchat/data/secret_chat_service.dart';
 
@@ -98,6 +99,10 @@ class SessionController extends AsyncNotifier<SessionState> {
     // starting conversations, so a device that never topped up would quietly
     // run out.
     unawaited(_prepareSecretChats());
+    // A live location outlives the process that started it. Closing the app
+    // is not ending the share, so the device picks up whatever is still
+    // running rather than leaving a stale pin behind (§12).
+    unawaited(ref.read(liveLocationControllerProvider).start());
     return restored;
   }
 

@@ -261,6 +261,157 @@ class GroupsRepository {
 
   Future<void> updateSettings(String chatId, ChatSettings settings) =>
       _api.put<dynamic>('/chats/$chatId/settings', body: settings.toJson());
+
+  /// Hands the chat to someone else.
+  ///
+  /// This is the one action that cannot be undone from the app: the caller
+  /// stops being the owner the moment it succeeds, so the screen that offers
+  /// it asks twice.
+  Future<void> transferOwnership(String chatId, String userId) =>
+      _api.post<dynamic>(
+        '/chats/$chatId/transfer-ownership',
+        body: <String, dynamic>{'user_id': userId},
+      );
+
+  /// Reach figures for specific channel posts.
+  ///
+  /// The server answers per message id rather than for the channel as a whole,
+  /// so the caller passes the posts it is showing. Asking with no ids returns
+  /// nothing, which is why the screen never calls this with an empty list.
+  Future<List<PostStatistics>> postStatistics(
+    String chatId,
+    List<String> messageIds,
+  ) async {
+    if (messageIds.isEmpty) {
+      return const <PostStatistics>[];
+    }
+    final String query =
+        messageIds.map((String id) => 'message_id=$id').join('&');
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/chats/$chatId/statistics?$query');
+    return <PostStatistics>[
+      for (final dynamic entry
+          in data['statistics'] as List<dynamic>? ?? const <dynamic>[])
+        PostStatistics.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
+  // ------------------------------------------------------------ role bundles
+
+  Future<List<GroupRole>> roles(String chatId) async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/chats/$chatId/roles');
+    return <GroupRole>[
+      for (final dynamic entry
+          in data['roles'] as List<dynamic>? ?? const <dynamic>[])
+        GroupRole.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
+  Future<GroupRole> createRole(
+    String chatId, {
+    required String name,
+    required Map<String, bool> permissions,
+    int rank = 0,
+  }) async {
+    final Map<String, dynamic> data = await _api.post<Map<String, dynamic>>(
+      '/chats/$chatId/roles',
+      body: <String, dynamic>{
+        'name': name,
+        'permissions': permissions,
+        'rank': rank,
+      },
+    );
+    return GroupRole.fromJson(data['role'] as Map<String, dynamic>);
+  }
+
+  Future<GroupRole> updateRole(
+    String chatId,
+    String roleId, {
+    required String name,
+    required Map<String, bool> permissions,
+    int rank = 0,
+  }) async {
+    final Map<String, dynamic> data = await _api.put<Map<String, dynamic>>(
+      '/chats/$chatId/roles/$roleId',
+      body: <String, dynamic>{
+        'name': name,
+        'permissions': permissions,
+        'rank': rank,
+      },
+    );
+    return GroupRole.fromJson(data['role'] as Map<String, dynamic>);
+  }
+
+  Future<void> deleteRole(String chatId, String roleId) =>
+      _api.delete<dynamic>('/chats/$chatId/roles/$roleId');
+
+  /// Gives a member a named role, or takes it away when [roleId] is null.
+  Future<void> assignRole(String chatId, String userId, String? roleId) =>
+      _api.put<dynamic>(
+        '/chats/$chatId/members/$userId/role-bundle',
+        body: <String, dynamic>{'role_id': roleId},
+      );
+}
+
+/// Reach figures for one channel post (§15).
+class PostStatistics {
+  const PostStatistics({
+    required this.messageId,
+    required this.viewCount,
+    required this.forwardCount,
+    required this.reactionCount,
+    required this.commentCount,
+  });
+
+  factory PostStatistics.fromJson(Map<String, dynamic> json) => PostStatistics(
+        messageId: json['message_id'] as String,
+        viewCount: (json['view_count'] as num?)?.toInt() ?? 0,
+        forwardCount: (json['forward_count'] as num?)?.toInt() ?? 0,
+        reactionCount: (json['reaction_count'] as num?)?.toInt() ?? 0,
+        commentCount: (json['comment_count'] as num?)?.toInt() ?? 0,
+      );
+
+  final String messageId;
+  final int viewCount;
+  final int forwardCount;
+  final int reactionCount;
+  final int commentCount;
+}
+
+/// A named bundle of permissions that members can be given.
+///
+/// It sits between the chat-wide defaults and a member's own overrides, so
+/// "moderator" can be defined once rather than re-entered for every person who
+/// holds it.
+class GroupRole {
+  const GroupRole({
+    required this.id,
+    required this.name,
+    required this.permissions,
+    this.rank = 0,
+    this.memberCount = 0,
+  });
+
+  factory GroupRole.fromJson(Map<String, dynamic> json) => GroupRole(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? '',
+        permissions: <String, bool>{
+          for (final MapEntry<String, dynamic> entry
+              in (json['permissions'] as Map<String, dynamic>? ??
+                      <String, dynamic>{})
+                  .entries)
+            entry.key: entry.value as bool? ?? false,
+        },
+        rank: (json['rank'] as num?)?.toInt() ?? 0,
+        memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
+      );
+
+  final String id;
+  final String name;
+  final Map<String, bool> permissions;
+  final int rank;
+  final int memberCount;
 }
 
 /// The administrative knobs on a group or channel (§14, §15).
@@ -388,4 +539,10 @@ final FutureProviderFamily<ChatSettings, String> chatSettingsProvider =
     FutureProvider.family<ChatSettings, String>(
   (Ref ref, String chatId) =>
       ref.watch(groupsRepositoryProvider).settings(chatId),
+);
+
+final FutureProviderFamily<List<GroupRole>, String> chatRolesProvider =
+    FutureProvider.family<List<GroupRole>, String>(
+  (Ref ref, String chatId) =>
+      ref.watch(groupsRepositoryProvider).roles(chatId),
 );

@@ -69,11 +69,28 @@ class InboundSync {
   void _onFrame(SocketFrame frame) {
     switch (frame.event) {
       case eventMessageNew:
-      case eventLocationUpdated:
         final Map<String, dynamic>? message =
             frame.payload['message'] as Map<String, dynamic>?;
         if (message != null) {
           unawaited(storeMessage(message));
+        }
+
+      case eventLocationUpdated:
+        // The end of a share carries no message — there is no new position to
+        // show, only the fact that there will not be another. Without this the
+        // last point would keep rendering as live until its original deadline,
+        // which is precisely the lie that stopping a share is meant to end.
+        final String? stoppedId = frame.payload['stopped'] == true
+            ? frame.payload['message_id'] as String?
+            : null;
+        if (stoppedId != null) {
+          unawaited(_db.endLiveLocation(stoppedId));
+          return;
+        }
+        final Map<String, dynamic>? moved =
+            frame.payload['message'] as Map<String, dynamic>?;
+        if (moved != null) {
+          unawaited(storeMessage(moved));
         }
 
       case eventMessageEdited:

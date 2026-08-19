@@ -125,6 +125,26 @@ class StoriesRepository {
 
   Future<void> delete(String storyId) =>
       _api.delete<Map<String, dynamic>>('/stories/$storyId');
+
+  /// The close-friends list, which is what the `close_friends` privacy setting
+  /// resolves against.
+  Future<List<String>> closeFriends() async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/stories/close-friends');
+    return <String>[
+      for (final dynamic id
+          in data['user_ids'] as List<dynamic>? ?? const <dynamic>[])
+        id as String,
+    ];
+  }
+
+  /// Replaces the list wholesale, because that is what the server does: it is
+  /// not a set of adds and removes, so sending a subset would silently drop
+  /// everyone missing from it.
+  Future<void> setCloseFriends(List<String> userIds) => _api.put<dynamic>(
+        '/stories/close-friends',
+        body: <String, dynamic>{'user_ids': userIds},
+      );
 }
 
 final Provider<StoriesRepository> storiesRepositoryProvider =
@@ -141,4 +161,9 @@ final FutureProviderFamily<List<StoryViewer>, String> storyViewersProvider =
     FutureProvider.family<List<StoryViewer>, String>(
   (Ref ref, String storyId) =>
       ref.watch(storiesRepositoryProvider).viewers(storyId),
+);
+
+final FutureProvider<List<String>> closeFriendsProvider =
+    FutureProvider<List<String>>(
+  (Ref ref) => ref.watch(storiesRepositoryProvider).closeFriends(),
 );

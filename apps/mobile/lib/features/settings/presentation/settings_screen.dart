@@ -8,6 +8,7 @@ import '../../../core/settings/settings_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../stories/presentation/close_friends_screen.dart';
 import '../data/account_repository.dart';
 
 /// App settings (§43, §44, §55).
@@ -78,6 +79,26 @@ class SettingsScreen extends ConsumerWidget {
             title: Text(l10n.settingsSessions),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const SessionsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.group_outlined),
+            title: Text(l10n.storiesCloseFriends),
+            subtitle: Text(l10n.storiesCloseFriendsSubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const CloseFriendsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: Text(l10n.loginHistoryTitle),
+            subtitle: Text(l10n.loginHistorySubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const LoginHistoryScreen(),
+              ),
             ),
           ),
           ListTile(
@@ -384,6 +405,78 @@ class SessionsScreen extends ConsumerWidget {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+/// The sign-in log (§56).
+///
+/// Distinct from the session list, which shows what is signed in right now.
+/// This shows what has been *attempted*: a refused code, a sign-in from a city
+/// the owner has never been to. Those are the entries worth reading, so the
+/// failures are shown, not hidden.
+class LoginHistoryScreen extends ConsumerWidget {
+  const LoginHistoryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+    final AsyncValue<List<LoginEvent>> history =
+        ref.watch(loginHistoryProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: Text(l10n.loginHistoryTitle)),
+      body: history.when(
+        loading: () => const SobhLoading(),
+        error: (Object error, StackTrace _) => SobhErrorState(
+          error: error,
+          onRetry: () => ref.invalidate(loginHistoryProvider),
+        ),
+        data: (List<LoginEvent> rows) {
+          if (rows.isEmpty) {
+            return SobhEmptyState(
+              icon: Icons.history,
+              title: l10n.loginHistoryEmpty,
+            );
+          }
+          return ListView.separated(
+            itemCount: rows.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final LoginEvent entry = rows[index];
+              return ListTile(
+                leading: Icon(
+                  entry.succeeded ? Icons.login : Icons.gpp_bad_outlined,
+                  color: entry.succeeded ? palette.success : palette.error,
+                ),
+                title: Text(
+                  switch (entry.event) {
+                    'otp_request' => l10n.loginHistoryEventCodeRequested,
+                    'otp_verify' => l10n.loginHistoryEventCodeEntered,
+                    'refresh' => l10n.loginHistoryEventSessionRenewed,
+                    'password' => l10n.loginHistoryEventPassword,
+                    _ => entry.event,
+                  },
+                ),
+                subtitle: Text(
+                  <String>[
+                    DateFormat.yMd().add_Hm().format(entry.createdAt),
+                    if (entry.platform.isNotEmpty) entry.platform,
+                    if (entry.ip != null) entry.ip!,
+                  ].join(' · '),
+                ),
+                trailing: entry.succeeded
+                    ? null
+                    : Text(
+                        l10n.loginHistoryFailed,
+                        style: TextStyle(color: palette.error),
+                      ),
+              );
+            },
+          );
+        },
       ),
     );
   }

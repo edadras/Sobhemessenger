@@ -561,5 +561,89 @@
   "channelDiscussionGroup": "گروه گفتگو",
   "channelDiscussionUnlink": "جداکردن گروه گفتگو",
   "groupStickerSet": "استیکرست گروه",
-  "groupBroadcast": "فقط مدیران پیام بفرستند"
+  "groupBroadcast": "فقط مدیران پیام بفرستند",
+  "loginHistoryTitle": "تاریخچهٔ ورود",
+  "loginHistorySubtitle": "ورودهای موفق و تلاش‌های ناموفق",
+  "loginHistoryEmpty": "هنوز چیزی ثبت نشده",
+  "loginHistoryFailed": "ناموفق",
+  "loginHistoryEventCodeRequested": "درخواست کد",
+  "loginHistoryEventCodeEntered": "ورود با کد",
+  "loginHistoryEventSessionRenewed": "تمدید نشست",
+  "loginHistoryEventPassword": "رمز دومرحله‌ای",
+  "storiesCloseFriendsEdit": "ویرایش فهرست دوستان نزدیک",
+  "storiesCloseFriendsSubtitle": "چه کسانی استوری‌های خصوصی شما را می‌بینند",
+  "channelStatisticsTitle": "آمار پست‌ها",
+  "channelStatisticsEmpty": "هنوز پستی برای اندازه‌گیری نیست",
+  "channelStatisticsUntitledPost": "پست بدون متن",
+  "channelStatisticsViews": "بازدید",
+  "channelStatisticsForwards": "بازفرست",
+  "channelStatisticsReactions": "واکنش",
+  "channelStatisticsComments": "نظر",
+  "rolesTitle": "نقش‌ها",
+  "rolesSubtitle": "دسته‌ای از دسترسی‌ها که به اعضا داده می‌شود",
+  "rolesEmptyTitle": "هنوز نقشی تعریف نشده",
+  "rolesEmptyBody": "نقش یعنی یک بار تعریف کنید و به هر تعداد عضو بدهید؛ تغییر نقش، دسترسی همه‌شان را با هم عوض می‌کند.",
+  "rolesCreate": "نقش تازه",
+  "rolesEdit": "ویرایش نقش",
+  "rolesName": "نام نقش",
+  "rolesRank": "ترتیب نمایش",
+  "rolesAssign": "دادن نقش",
+  "rolesNone": "بدون نقش",
+  "rolesDeleteTitle": "حذف نقش؟",
+  "rolesGrantedCount": "{count, plural, =0{بدون دسترسی} other{{count} دسترسی}}",
+  "@rolesGrantedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rolesHolderCount": "{count, plural, =0{بدون عضو} other{{count} عضو}}",
+  "@rolesHolderCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "rolesDeleteBody": "«{name}» حذف می‌شود و {count} نفری که آن را دارند به دسترسی‌های پیش‌فرض گفتگو برمی‌گردند.",
+  "@rolesDeleteBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "permissionSendMessages": "فرستادن پیام",
+  "permissionSendMedia": "فرستادن عکس و ویدیو",
+  "permissionSendFiles": "فرستادن فایل",
+  "permissionSendPolls": "ساختن نظرسنجی",
+  "permissionSendStickers": "فرستادن استیکر",
+  "permissionEmbedLinks": "پیش‌نمایش پیوند",
+  "permissionAddMembers": "افزودن عضو",
+  "permissionRemoveMembers": "حذف عضو",
+  "permissionBanMembers": "محروم‌کردن عضو",
+  "permissionPinMessages": "سنجاق‌کردن پیام",
+  "permissionEditGroup": "ویرایش مشخصات گفتگو",
+  "permissionDeleteMessages": "حذف پیام دیگران",
+  "permissionManageAdmins": "تعیین مدیر",
+  "permissionManageCalls": "مدیریت تماس‌ها",
+  "permissionManageInvites": "مدیریت پیوندهای دعوت",
+  "permissionPostStories": "انتشار استوری کانال",
+  "groupsRemoveMember": "حذف از گفتگو",
+  "groupsTransferOwnership": "واگذاری مالکیت",
+  "groupsTransferOwnershipConfirm": "مالکیت به {name} داده می‌شود. از این پس شما مالک نیستید و این کار از داخل برنامه برگشت‌پذیر نیست.",
+  "@groupsTransferOwnershipConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "groupsTransferOwnershipConfirmAction": "واگذار کن",
+  "groupsTransferOwnershipDone": "مالکیت واگذار شد",
+  "locationLiveStop": "توقف اشتراک موقعیت"
 }
