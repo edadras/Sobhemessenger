@@ -29,7 +29,69 @@ ChatsCompanion _chat(
       peerName: Value<String?>(peerName),
     );
 
+
+/// Drafts (§7).
+///
+/// The one column where this device can be ahead of the server: somebody may
+/// be typing right now, and the row that arrived was fetched a moment ago. The
+/// rule is that the server's draft fills an empty box and never overwrites a
+/// full one — which is what lets a sentence started on another device turn up
+/// here, without a refresh destroying one in progress.
+void _draftTests() {
+  group('drafts', () {
+    late LocalDatabase db;
+
+    setUp(() async {
+      db = _database();
+      await db.upsertChats(<ChatsCompanion>[_chat('c1')]);
+    });
+
+    tearDown(() => db.close());
+
+    test('a draft from elsewhere fills an empty box', () async {
+      await db.adoptDraft('c1', 'از دستگاه دیگر');
+      final ChatRow row = (await db.chatById('c1'))!;
+      expect(row.draft, 'از دستگاه دیگر');
+    });
+
+    test('it never overwrites what is being typed here', () async {
+      await db.saveDraft('c1', 'در حال تایپ');
+      await db.adoptDraft('c1', 'از دستگاه دیگر');
+
+      final ChatRow row = (await db.chatById('c1'))!;
+      expect(
+        row.draft,
+        'در حال تایپ',
+        reason: 'a refresh must not destroy a sentence in progress',
+      );
+    });
+
+    test('an empty draft from the server clears nothing', () async {
+      await db.saveDraft('c1', 'در حال تایپ');
+      await db.adoptDraft('c1', '');
+
+      final ChatRow row = (await db.chatById('c1'))!;
+      expect(row.draft, 'در حال تایپ');
+    });
+
+    test('refreshing the chat list leaves the draft alone', () async {
+      await db.saveDraft('c1', 'در حال تایپ');
+      // The same chat coming back from the server, as a sync would write it.
+      await db.upsertChats(<ChatsCompanion>[_chat('c1', title: 'renamed')]);
+
+      final ChatRow row = (await db.chatById('c1'))!;
+      expect(row.title, 'renamed');
+      expect(
+        row.draft,
+        'در حال تایپ',
+        reason: 'the upsert must not carry a draft of its own',
+      );
+    });
+  });
+}
+
 void main() {
+  _draftTests();
   late LocalDatabase db;
 
   setUp(() => db = _database());

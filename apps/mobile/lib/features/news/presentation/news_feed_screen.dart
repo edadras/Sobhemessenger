@@ -68,13 +68,31 @@ class _NewsFeedScreenState extends ConsumerState<NewsFeedScreen> {
             );
           }
           return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(newsFeedProvider(query)),
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: SobhSpacing.sm),
-              itemCount: articles.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (BuildContext context, int index) =>
-                  ArticleTile(article: articles[index]),
+            onRefresh: () async {
+              ref
+                ..invalidate(newsFeedProvider(query))
+                ..invalidate(breakingArticleProvider(locale));
+            },
+            child: CustomScrollView(
+              slivers: <Widget>[
+                // Above the list rather than in it. A story flagged as
+                // breaking is buried among fifty others if it is only sorted
+                // differently, and the reader has to know to look for it.
+                // Only on the ordinary feed: the breaking *mode* is already a
+                // list of these, and a banner over its own contents is noise.
+                if (_mode != FeedMode.breaking)
+                  SliverToBoxAdapter(child: _BreakingBanner(locale: locale)),
+                SliverPadding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: SobhSpacing.sm),
+                  sliver: SliverList.separated(
+                    itemCount: articles.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (BuildContext context, int index) =>
+                        ArticleTile(article: articles[index]),
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -242,6 +260,80 @@ class BookmarksScreen extends ConsumerWidget {
                 itemBuilder: (BuildContext context, int index) =>
                     ArticleTile(article: articles[index]),
               ),
+      ),
+    );
+  }
+}
+
+/// The single story currently marked as breaking.
+///
+/// Renders nothing at all when there is none, and nothing when the request
+/// fails: a banner that cannot load is not worth an error over a feed that
+/// loaded perfectly well, and an empty box where news used to be would be
+/// read as news having stopped.
+class _BreakingBanner extends ConsumerWidget {
+  const _BreakingBanner({required this.locale});
+
+  final String locale;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+    final Article? article =
+        ref.watch(breakingArticleProvider(locale)).valueOrNull;
+    if (article == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        SobhSpacing.md,
+        SobhSpacing.md,
+        SobhSpacing.md,
+        0,
+      ),
+      child: Material(
+        color: palette.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(SobhRadius.md),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(SobhRadius.md),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ArticleScreen(slug: article.slug),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(SobhSpacing.md),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.bolt, color: palette.error),
+                const SizedBox(width: SobhSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        l10n.newsBreaking,
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelSmall
+                            ?.copyWith(color: palette.error),
+                      ),
+                      Text(
+                        article.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

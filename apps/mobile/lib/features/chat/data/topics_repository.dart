@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../auth/session_controller.dart';
@@ -68,6 +69,7 @@ class TopicsRepository {
   TopicsRepository(this._api);
 
   final ApiClient _api;
+  static const Uuid _uuid = Uuid();
 
   Future<List<ForumTopic>> list(String chatId) async {
     final Map<String, dynamic> data =
@@ -136,6 +138,50 @@ class TopicsRepository {
   Future<void> delete(String chatId, String topicId) =>
       _api.delete<dynamic>('/chats/$chatId/topics/$topicId');
 
+  /// One topic's messages, newest last.
+  ///
+  /// Fetched rather than read from the local store, which has no notion of a
+  /// topic: the offline cache is per chat, and a forum's history is filed
+  /// under General plus whatever topics exist. Caching it per topic as well
+  /// would be a second copy of the same rows to keep in step, for a screen
+  /// people open deliberately rather than live in.
+  Future<List<TopicMessage>> messages(
+    String chatId,
+    String topicId, {
+    int? beforeSeq,
+    int limit = 50,
+  }) async {
+    final String query = <String>[
+      'limit=$limit',
+      if (beforeSeq != null) 'before_seq=$beforeSeq',
+    ].join('&');
+    final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
+      '/chats/$chatId/topics/$topicId/messages?$query',
+    );
+    return <TopicMessage>[
+      for (final dynamic entry
+          in data['messages'] as List<dynamic>? ?? const <dynamic>[])
+        TopicMessage.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
+  /// Posts into a topic. The topic id is what files it there; without one the
+  /// message lands in General, which is what the server does for a forum.
+  Future<void> post({
+    required String chatId,
+    required String topicId,
+    required String content,
+  }) =>
+      _api.post<dynamic>(
+        '/chats/$chatId/messages',
+        body: <String, dynamic>{
+          'client_message_id': _uuid.v4(),
+          'type': 'text',
+          'content': content,
+          'topic_id': topicId,
+        },
+      );
+
   Future<void> markRead(String chatId, String topicId, int seq) =>
       _api.post<dynamic>(
         '/chats/$chatId/topics/$topicId/read',
@@ -151,4 +197,46 @@ final Provider<TopicsRepository> topicsRepositoryProvider =
 final FutureProviderFamily<List<ForumTopic>, String> forumTopicsProvider =
     FutureProvider.family<List<ForumTopic>, String>(
   (Ref ref, String chatId) => ref.watch(topicsRepositoryProvider).list(chatId),
+);
+
+/// One message inside a topic.
+///
+/// Deliberately thinner than the chat screen's row: this is a fetched view of
+/// a filed conversation, not the offline-first store, so it carries what the
+/// list draws and nothing more.
+class TopicMessage {
+  const TopicMessage({
+    required this.id,
+    required this.seq,
+    required this.content,
+    required this.createdAt,
+    this.senderId,
+    this.senderName = '',
+    this.isDeleted = false,
+  });
+
+  factory TopicMessage.fromJson(Map<String, dynamic> json) => TopicMessage(
+        id: json['id'] as String,
+        seq: (json['seq'] as num?)?.toInt() ?? 0,
+        content: json['content'] as String? ?? '',
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+        senderId: json['sender_id'] as String?,
+        senderName: json['sender_name'] as String? ?? '',
+        isDeleted: json['deleted_at'] != null,
+      );
+
+  final String id;
+  final int seq;
+  final String content;
+  final DateTime createdAt;
+  final String? senderId;
+  final String senderName;
+  final bool isDeleted;
+}
+
+final FutureProviderFamily<List<TopicMessage>, (String, String)>
+    topicMessagesProvider =
+    FutureProvider.family<List<TopicMessage>, (String, String)>(
+  (Ref ref, (String, String) key) =>
+      ref.watch(topicsRepositoryProvider).messages(key.$1, key.$2),
 );

@@ -70,6 +70,13 @@ type SelfProfile struct {
 	Profile
 	PhoneNumber string     `json:"phone_number"`
 	Birthday    *time.Time `json:"birthday,omitempty"`
+	// TwoStepEnabled says whether a second factor is set. The settings screen
+	// cannot ask "is it on?" any other way, and without it the only way to
+	// find out was to be locked out at the next sign-in.
+	TwoStepEnabled bool `json:"two_step_enabled"`
+	// TwoStepHint is the reminder the owner chose, shown back to them so they
+	// can see what it says before they need it.
+	TwoStepHint string `json:"two_step_hint,omitempty"`
 }
 
 // PrivacyKeys are the settings a person may govern (§55).
@@ -161,14 +168,16 @@ func (r *Repository) Self(ctx context.Context, userID uuid.UUID) (*SelfProfile, 
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT u.id, u.username, u.phone_number, COALESCE(p.display_name, ''),
 		       COALESCE(p.about, ''), p.avatar_media_id, COALESCE(p.language, 'fa'),
-		       u.is_bot, u.last_seen_at, p.birthday
+		       u.is_bot, u.last_seen_at, p.birthday,
+		       u.two_step_enabled, COALESCE(u.two_step_hint, '')
 		  FROM users u
 		  LEFT JOIN user_profiles p ON p.user_id = u.id
 		 WHERE u.id = $1 AND u.deleted_at IS NULL`,
 		userID,
 	).Scan(&profile.UserID, &profile.Username, &profile.PhoneNumber,
 		&profile.DisplayName, &profile.About, &profile.AvatarID, &profile.Language,
-		&profile.IsBot, &profile.LastSeen, &profile.Birthday)
+		&profile.IsBot, &profile.LastSeen, &profile.Birthday,
+		&profile.TwoStepEnabled, &profile.TwoStepHint)
 	if database.IsNoRows(err) {
 		return nil, ErrNotFound
 	}

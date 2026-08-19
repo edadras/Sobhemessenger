@@ -85,6 +85,7 @@ class ChatRepository {
 
     final List<ChatsCompanion> rows = <ChatsCompanion>[];
     final List<String> ids = <String>[];
+    final Map<String, String> drafts = <String, String>{};
 
     for (final dynamic entry in raw) {
       final Map<String, dynamic> chat = entry as Map<String, dynamic>;
@@ -95,6 +96,10 @@ class ChatRepository {
 
       final String id = chat['id'] as String;
       ids.add(id);
+      final String draft = membership['draft'] as String? ?? '';
+      if (draft.isNotEmpty) {
+        drafts[id] = draft;
+      }
       rows.add(
         ChatsCompanion.insert(
           id: id,
@@ -133,6 +138,14 @@ class ChatRepository {
     }
 
     await _db.upsertChats(rows);
+
+    // Drafts come after, and only into an empty box. The server holds the last
+    // one written from any device, so this is how a sentence started on the
+    // desktop turns up on the phone — while a refresh that lands mid-typing
+    // leaves what is being typed alone.
+    for (final MapEntry<String, String> draft in drafts.entries) {
+      await _db.adoptDraft(draft.key, draft.value);
+    }
 
     // Pruning removes conversations left or deleted on another device, which
     // would otherwise sit in the list for ever. It is only safe when this page
@@ -180,6 +193,29 @@ class ChatRepository {
       );
     } on ApiException {
       // Nothing to tell the user and nothing they could do.
+    }
+  }
+
+  /// Saves what is half-typed, here and on the server (§7).
+  ///
+  /// A draft is the one piece of chat state that is neither a message nor a
+  /// setting: it is what somebody was in the middle of saying. Keeping it only
+  /// on the device means picking up the phone after starting on the desktop
+  /// and finding an empty box, with no sign anything was lost.
+  ///
+  /// Written locally first so the compose box survives being closed with no
+  /// network, and pushed best-effort: a draft that did not reach the server is
+  /// not worth an error in front of somebody mid-sentence, and the next
+  /// keystroke tries again.
+  Future<void> saveDraft(String chatId, String draft) async {
+    await _db.saveDraft(chatId, draft);
+    try {
+      await _api.put<dynamic>(
+        '/chats/$chatId/draft',
+        body: <String, dynamic>{'draft': draft},
+      );
+    } on ApiException {
+      // Nothing to tell the user, and nothing they could do about it.
     }
   }
 

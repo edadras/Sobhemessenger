@@ -243,14 +243,35 @@ class LocalDatabase extends _$LocalDatabase {
       for (final ChatsCompanion row in rows) {
         batch.insert(
           chats,
-          row,
+          // The draft is decided separately, by adoptDraft — an upsert that
+          // wrote it wholesale would overwrite a sentence being typed with a
+          // row fetched a moment earlier.
+          row.copyWith(draft: const Value<String>.absent()),
           onConflict: DoUpdate(
-            (_) => row,
+            (_) => row.copyWith(draft: const Value<String>.absent()),
             target: <Column<Object>>[chats.id],
           ),
         );
       }
     });
+  }
+
+  /// Takes the server's draft for a chat, but only into an empty box.
+  ///
+  /// A draft is the one piece of chat state where this device can be ahead of
+  /// the server: somebody may be typing right now, and the row that arrived
+  /// was fetched a moment ago. Filling only an empty box is what lets a draft
+  /// started on another device turn up here, without a refresh ever destroying
+  /// a sentence in progress.
+  Future<void> adoptDraft(String chatId, String draft) {
+    if (draft.isEmpty) {
+      return Future<void>.value();
+    }
+    return (update(chats)
+          ..where(
+            ($ChatsTable t) => t.id.equals(chatId) & t.draft.equals(''),
+          ))
+        .write(ChatsCompanion(draft: Value<String>(draft)));
   }
 
   /// Removes local chats the server no longer lists.
@@ -453,6 +474,16 @@ class LocalDatabase extends _$LocalDatabase {
         lastSyncedAt: Value<DateTime>(DateTime.now()),
       ),
     );
+  }
+
+  /// Stores what is half-typed in a chat.
+  ///
+  /// This device's own state, which is why [upsertChats] leaves the column
+  /// alone: the server's view of a chat knows nothing about what is sitting
+  /// unsent in its compose box on this phone.
+  Future<void> saveDraft(String chatId, String draft) {
+    return (update(chats)..where(($ChatsTable t) => t.id.equals(chatId)))
+        .write(ChatsCompanion(draft: Value<String>(draft)));
   }
 
   /// Every location message this device holds that is still being shared.

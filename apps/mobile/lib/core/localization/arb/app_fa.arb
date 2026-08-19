@@ -715,5 +715,53 @@
         "type": "String"
       }
     }
+  },
+  "twoStepTitle": "رمز دومرحله‌ای",
+  "twoStepSubtitle": "لایهٔ دوم پس از کد پیامکی",
+  "twoStepOn": "روشن است",
+  "twoStepOff": "خاموش است",
+  "twoStepBody": "با روشن‌بودن این رمز، داشتن کد پیامکی برای ورود کافی نیست. اگر فراموشش کنید، تنها راه بازگشت نشانی ایمیل بازیابی است.",
+  "twoStepCurrent": "رمز فعلی",
+  "twoStepNew": "رمز تازه",
+  "twoStepPassword": "رمز",
+  "twoStepRepeat": "تکرار رمز",
+  "twoStepMinimum": "دست‌کم ۸ نویسه",
+  "twoStepHint": "یادآور (اختیاری)",
+  "twoStepHintWarning": "یادآور به هر کسی که به مرحلهٔ رمز برسد نشان داده می‌شود؛ چیزی ننویسید که خودِ رمز را لو بدهد.",
+  "twoStepEnable": "روشن کردن",
+  "twoStepChange": "تغییر رمز",
+  "twoStepRemove": "برداشتن رمز",
+  "twoStepRemoveConfirm": "لایهٔ دوم برداشته می‌شود و از این پس تنها کد پیامکی برای ورود لازم است.",
+  "twoStepSaved": "رمز ذخیره شد",
+  "twoStepRemoved": "رمز برداشته شد",
+  "twoStepTooShort": "رمز دست‌کم باید ۸ نویسه باشد",
+  "twoStepMismatch": "دو رمز یکی نیستند",
+  "twoStepCurrentHint": "یادآور فعلی: {hint}",
+  "@twoStepCurrentHint": {
+    "placeholders": {
+      "hint": {
+        "type": "String"
+      }
+    }
+  },
+  "topicEmptyTitle": "هنوز پیامی در این موضوع نیست",
+  "topicEmptyBody": "اولین پیام را بنویسید",
+  "topicsClosedNotice": "این موضوع بسته است و پیام تازه نمی‌پذیرد",
+  "callDetailsTitle": "جزئیات تماس",
+  "callDetailsThisDevice": "این دستگاه",
+  "callDetailsOtherSide": "طرف مقابل",
+  "callDetailsNothingRecorded": "چیزی برای این تماس ثبت نشده",
+  "callDetailsWifi": "وای‌فای",
+  "callDetailsCellular": "دادهٔ همراه",
+  "callDetailsEthernet": "کابلی",
+  "callDetailsNetworkUnknown": "شبکهٔ نامعلوم",
+  "callDetailsIncomplete": "مذاکره کامل نشد",
+  "callDetailsRoutes": "{count, plural, =0{بدون مسیر} other{{count} مسیر}}",
+  "@callDetailsRoutes": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   }
 }

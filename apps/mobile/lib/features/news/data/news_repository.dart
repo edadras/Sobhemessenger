@@ -144,6 +144,20 @@ class NewsRepository {
         ),
       );
 
+  /// The one story currently marked as breaking, or null when there is none.
+  ///
+  /// Different from the `breaking` feed mode, which is a *list* of everything
+  /// ever flagged. This is the single item a banner shows, so the feed can say
+  /// "this is happening now" above the ordinary list rather than making the
+  /// reader spot it among fifty others.
+  Future<Article?> breaking(String locale) async {
+    final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
+      '/news/breaking?locale=$locale',
+    );
+    final Object? article = data['article'];
+    return article is Map<String, dynamic> ? Article.fromJson(article) : null;
+  }
+
   Future<List<Article>> bookmarks(String locale) async {
     final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
       '/news-reader/bookmarks',
@@ -219,4 +233,10 @@ final FutureProviderFamily<List<Article>, String> newsBookmarksProvider =
     FutureProvider.family<List<Article>, String>(
   (Ref ref, String locale) =>
       ref.watch(newsRepositoryProvider).bookmarks(locale),
+);
+
+final FutureProviderFamily<Article?, String> breakingArticleProvider =
+    FutureProvider.family<Article?, String>(
+  (Ref ref, String locale) =>
+      ref.watch(newsRepositoryProvider).breaking(locale),
 );

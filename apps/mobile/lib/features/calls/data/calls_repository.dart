@@ -227,6 +227,23 @@ class CallsRepository {
 
   /// Fetches ICE servers. The TURN credentials are short-lived HMACs, so they
   /// are requested per call rather than cached.
+  /// What each leg of a call negotiated (§21).
+  ///
+  /// For participants of that call only, and it returns no SDP and no
+  /// candidates — handing those to anyone who can see the call would give a
+  /// participant list the means to impersonate a leg. What comes back is who
+  /// was on it, over what, and how far the negotiation got: enough to explain
+  /// a call that went badly and nothing more.
+  Future<List<CallSession>> sessions(String callId) async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/calls/$callId/sessions');
+    return <CallSession>[
+      for (final dynamic entry
+          in data['sessions'] as List<dynamic>? ?? const <dynamic>[])
+        CallSession.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+
   Future<List<IceServer>> iceServers() async {
     final Map<String, dynamic> data =
         await _api.get<Map<String, dynamic>>('/calls/ice-servers');
@@ -246,4 +263,50 @@ final Provider<CallsRepository> callsRepositoryProvider =
 final FutureProvider<List<Call>> callHistoryProvider =
     FutureProvider<List<Call>>(
   (Ref ref) => ref.watch(callsRepositoryProvider).history(),
+);
+
+/// One participant's side of a call, as the server recorded it.
+class CallSession {
+  const CallSession({
+    required this.userId,
+    required this.hasOffer,
+    required this.hasAnswer,
+    required this.candidateCount,
+    required this.createdAt,
+    this.networkType = '',
+    this.closedAt,
+  });
+
+  factory CallSession.fromJson(Map<String, dynamic> json) => CallSession(
+        userId: json['user_id'] as String,
+        hasOffer: json['has_offer'] as bool? ?? false,
+        hasAnswer: json['has_answer'] as bool? ?? false,
+        candidateCount: (json['candidate_count'] as num?)?.toInt() ?? 0,
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+        networkType: json['network_type'] as String? ?? '',
+        closedAt: json['closed_at'] == null
+            ? null
+            : DateTime.parse(json['closed_at'] as String).toLocal(),
+      );
+
+  final String userId;
+  final bool hasOffer;
+  final bool hasAnswer;
+  final int candidateCount;
+  final DateTime createdAt;
+
+  /// What the leg reported it was on. Empty when no signal from it said.
+  final String networkType;
+  final DateTime? closedAt;
+
+  /// A leg that offered and was answered, with candidates to try. Short of
+  /// this, the two sides never had the makings of a connection — which is a
+  /// different problem from one that connected and sounded bad.
+  bool get negotiated => hasOffer && hasAnswer && candidateCount > 0;
+}
+
+final FutureProviderFamily<List<CallSession>, String> callSessionsProvider =
+    FutureProvider.family<List<CallSession>, String>(
+  (Ref ref, String callId) =>
+      ref.watch(callsRepositoryProvider).sessions(callId),
 );

@@ -6,6 +6,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../data/topics_repository.dart';
+import 'topic_screen.dart';
 
 /// The topics inside a forum (§14).
 ///
@@ -151,6 +152,13 @@ class _TopicTile extends ConsumerWidget {
         ],
       ),
       subtitle: Text(l10n.topicsMessageCount(topic.messageCount)),
+      // Tapping a topic did nothing, which made a forum a chat with labels on
+      // it: the whole point is that each topic is its own conversation.
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => TopicScreen(chatId: chatId, topic: topic),
+        ),
+      ),
       trailing: _trailing(context, ref, l10n),
     );
   }

@@ -254,6 +254,29 @@ class AccountRepository {
     ];
   }
 
+  // ------------------------------------------------------------- two-step
+
+  /// Sets, changes or removes the two-step password (§57).
+  ///
+  /// One endpoint for all three because they are one decision — what the
+  /// second factor on this account is, with the empty string meaning "none".
+  /// [current] is required once a password exists: without it, anybody
+  /// holding a live session could replace the factor that protects the
+  /// account from somebody holding a live session.
+  Future<void> setTwoStepPassword({
+    required String password,
+    String current = '',
+    String hint = '',
+  }) =>
+      _api.put<dynamic>(
+        '/auth/two-step',
+        body: <String, dynamic>{
+          'new_password': password,
+          if (current.isNotEmpty) 'current_password': current,
+          if (hint.isNotEmpty) 'hint': hint,
+        },
+      );
+
   // ----------------------------------------------------------- data rights
 
   /// Export and deletion requests on this account (§60).

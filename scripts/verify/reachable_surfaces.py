@@ -575,6 +575,149 @@ if signal_call:
                       "network_type": "carrier-pigeon", "payload": {}})
     check("an unknown network type is refused", status == 422, f"got {status}")
 
+# ------------------------------------------------------------- two-step
+
+section("setting the second factor")
+
+status, body = call("GET", "/users/me", bob_token)
+me = data_of(body)
+# The settings screen has no other way to ask whether it is on. Without this
+# the only way to find out was to be locked out at the next sign-in.
+check("the profile says whether two-step is on",
+      "two_step_enabled" in me, str(sorted(me)))
+check("and it is off to begin with",
+      me.get("two_step_enabled") is False, str(me.get("two_step_enabled")))
+
+status, body = call("PUT", "/auth/two-step", bob_token,
+                    {"new_password": "short"})
+check("a short password is refused", status == 422, f"{status} {body}")
+
+status, body = call("PUT", "/auth/two-step", bob_token,
+                    {"new_password": "probe-passphrase-1", "hint": "the probe"})
+check("a password can be set", status == 200, f"{status} {body}")
+
+status, body = call("GET", "/users/me", bob_token)
+me = data_of(body)
+check("the profile now says it is on",
+      me.get("two_step_enabled") is True, str(me))
+check("and shows the owner their own hint",
+      me.get("two_step_hint") == "the probe", str(me))
+
+status, body = call("PUT", "/auth/two-step", bob_token,
+                    {"new_password": "probe-passphrase-2"})
+# Somebody holding a live session must not be able to replace the factor that
+# exists to guard against somebody holding a live session.
+check("changing it without the current password is refused",
+      status == 401, f"{status} {body}")
+
+status, body = call("PUT", "/auth/two-step", bob_token,
+                    {"current_password": "probe-passphrase-1",
+                     "new_password": "probe-passphrase-2"})
+check("changing it with the current password works", status == 200,
+      f"{status} {body}")
+
+status, _ = call("PUT", "/auth/two-step", bob_token,
+                 {"current_password": "probe-passphrase-2", "new_password": ""})
+check("it can be turned off again", status == 200, f"got {status}")
+status, body = call("GET", "/users/me", bob_token)
+check("and the profile agrees",
+      data_of(body).get("two_step_enabled") is False, str(data_of(body)))
+
+# ---------------------------------------------------------------- drafts
+
+section("a draft that follows you")
+
+status, _ = call("PUT", f"/chats/{private_chat}/draft", alice_token,
+                 {"draft": "نیمه‌تمام"})
+check("a draft can be stored", status in (200, 204), f"got {status}")
+
+status, body = call("GET", "/chats", alice_token)
+def membership_of(token, chat_id):
+    _, listing = call("GET", "/chats", token)
+    for entry in data_of(listing).get("chats") or []:
+        if entry.get("id") == chat_id:
+            return entry.get("membership") or {}
+    return {}
+
+# This is what makes a draft worth syncing: another device reads it back from
+# the chat list, so an unfinished sentence is waiting there too. It rides on
+# the membership rather than the chat, because a draft belongs to one person.
+check("it comes back on the chat list",
+      membership_of(alice_token, private_chat).get("draft") == "نیمه‌تمام",
+      str(membership_of(alice_token, private_chat)))
+
+# The other side has their own, so one person's draft is not the chat's.
+check("it is not shown to the other member",
+      not membership_of(bob_token, private_chat).get("draft"),
+      str(membership_of(bob_token, private_chat)))
+
+status, _ = call("PUT", f"/chats/{private_chat}/draft", alice_token,
+                 {"draft": ""})
+check("clearing it clears it",
+      not membership_of(alice_token, private_chat).get("draft"),
+      str(membership_of(alice_token, private_chat)))
+
+status, _ = call("PUT", f"/chats/{private_chat}/draft", carol_token,
+                 {"draft": "غریبه"})
+check("a non-member cannot leave one", status in (403, 404), f"got {status}")
+
+# ---------------------------------------------------------- forum topics
+
+section("reading one topic on its own")
+
+forum = make_chat(alice_token, "group", "انجمن آزمون", member_ids=[bob_id])
+status, body = call("POST", f"/chats/{forum}/forum", alice_token)
+check("a group can become a forum", status in (200, 201), f"{status} {body}")
+
+status, body = call("POST", f"/chats/{forum}/topics", alice_token,
+                    {"title": "موضوع یک"})
+topic_one = (data_of(body).get("topic") or {}).get("id")
+check("a topic can be created", bool(topic_one), f"{status} {body}")
+
+status, body = call("POST", f"/chats/{forum}/topics", alice_token,
+                    {"title": "موضوع دو"})
+topic_two = (data_of(body).get("topic") or {}).get("id")
+check("and a second one", bool(topic_two), f"{status} {body}")
+
+if topic_one and topic_two:
+    for text in ("اول", "دوم"):
+        call("POST", f"/chats/{forum}/messages", alice_token,
+             {"client_message_id": str(uuid.uuid4()), "type": "text",
+              "content": text, "topic_id": topic_one})
+    call("POST", f"/chats/{forum}/messages", alice_token,
+         {"client_message_id": str(uuid.uuid4()), "type": "text",
+          "content": "جای دیگر", "topic_id": topic_two})
+
+    status, body = call("GET", f"/chats/{forum}/topics/{topic_one}/messages",
+                        alice_token)
+    check("one topic's messages can be read", status == 200, f"{status} {body}")
+    contents = [m.get("content") for m in (data_of(body).get("messages") or [])]
+    # The whole point of a forum: each topic is its own conversation, not a
+    # label on one.
+    check("it holds only its own", sorted(contents) == ["اول", "دوم"],
+          str(contents))
+
+    status, body = call("GET", f"/chats/{forum}/topics/{topic_two}/messages",
+                        alice_token)
+    contents = [m.get("content") for m in (data_of(body).get("messages") or [])]
+    check("and the other holds only its own", contents == ["جای دیگر"],
+          str(contents))
+
+    status, _ = call("GET", f"/chats/{forum}/topics/{topic_one}/messages",
+                     carol_token)
+    check("a non-member reads nothing", status in (403, 404), f"got {status}")
+
+# -------------------------------------------------------- breaking banner
+
+section("the one breaking story")
+
+status, body = call("GET", "/news/breaking?locale=fa", alice_token)
+check("the banner endpoint answers", status == 200, f"{status} {body}")
+# Null is the ordinary state — most of the time nothing is breaking — and the
+# banner has to be able to tell that from a failure.
+check("no breaking story is an answer, not an error",
+      "article" in data_of(body), str(data_of(body)))
+
 # ------------------------------------------------- the refused sign-in, last
 
 section("a refused code reaches the sign-in history")

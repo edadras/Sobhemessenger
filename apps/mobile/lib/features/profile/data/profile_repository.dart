@@ -64,6 +64,8 @@ class SelfProfile extends UserProfile {
     super.isBot,
     super.lastSeen,
     this.birthday,
+    this.twoStepEnabled = false,
+    this.twoStepHint = '',
   });
 
   factory SelfProfile.fromJson(Map<String, dynamic> json) => SelfProfile(
@@ -81,10 +83,21 @@ class SelfProfile extends UserProfile {
         birthday: json['birthday'] == null
             ? null
             : DateTime.parse(json['birthday'] as String).toLocal(),
+        twoStepEnabled: json['two_step_enabled'] as bool? ?? false,
+        twoStepHint: json['two_step_hint'] as String? ?? '',
       );
 
   final String phoneNumber;
   final DateTime? birthday;
+
+  /// Whether a second factor guards this account. The settings screen has no
+  /// other way to ask; without it the only way to find out was to be locked
+  /// out at the next sign-in.
+  final bool twoStepEnabled;
+
+  /// The reminder the owner chose, shown back to them so they can see what it
+  /// says before they are relying on it.
+  final String twoStepHint;
 }
 
 /// Why a username cannot be claimed, as the server decided it.

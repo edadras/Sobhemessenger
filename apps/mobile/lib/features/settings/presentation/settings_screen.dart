@@ -11,6 +11,7 @@ import '../../../core/widgets/async_states.dart';
 import '../../stories/presentation/close_friends_screen.dart';
 import '../data/account_repository.dart';
 import 'data_rights_screen.dart';
+import 'two_step_screen.dart';
 
 /// App settings (§43, §44, §55).
 class SettingsScreen extends ConsumerWidget {
@@ -90,6 +91,14 @@ class SettingsScreen extends ConsumerWidget {
               MaterialPageRoute<void>(
                 builder: (_) => const CloseFriendsScreen(),
               ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.password_outlined),
+            title: Text(l10n.twoStepTitle),
+            subtitle: Text(l10n.twoStepSubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const TwoStepScreen()),
             ),
           ),
           ListTile(

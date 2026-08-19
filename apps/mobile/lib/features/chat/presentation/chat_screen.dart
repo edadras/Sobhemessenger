@@ -75,6 +75,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _typing = false;
   Timer? _typingStopTimer;
 
+  Timer? _draftSaveTimer;
+
+  /// What the server was last told, so an unchanged box does not keep sending
+  /// the same string — including the empty one, on every chat that is opened
+  /// and closed without typing.
+  String? _savedDraft;
+
+  /// How long a pause counts as having stopped for the purposes of a draft.
+  static const Duration _draftIdle = Duration(seconds: 2);
+
   /// How long a pause counts as having stopped typing.
   static const Duration _typingIdle = Duration(seconds: 3);
 
@@ -86,7 +96,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // silently fills in when the network returns.
     unawaited(_loadHistory());
     _scrollController.addListener(_onScroll);
+    unawaited(_restoreDraft());
     _composer.addListener(_onComposerChanged);
+  }
+
+  /// Puts back whatever was left half-typed here.
+  ///
+  /// Read from the local row, which the chat-list sync fills in from the
+  /// server — so a draft started on another device is waiting in the box, and
+  /// one started here survives the app being closed.
+  ///
+  /// The listener is attached afterwards, so restoring text does not look like
+  /// typing and announce the user to the other side.
+  Future<void> _restoreDraft() async {
+    final ChatRow? chat = await ref
+        .read(localDatabaseProvider)
+        .chatById(widget.chatId);
+    final String draft = chat?.draft ?? '';
+    _savedDraft = draft;
+    if (draft.isNotEmpty && mounted && _composer.text.isEmpty) {
+      _composer
+        ..removeListener(_onComposerChanged)
+        ..text = draft
+        ..addListener(_onComposerChanged);
+    }
   }
 
   /// Tells the other side the user is typing, and stops saying so once they
@@ -98,6 +131,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// typing sends nothing at all.
   void _onComposerChanged() {
     _typingStopTimer?.cancel();
+    _scheduleDraftSave();
 
     if (_composer.text.trim().isEmpty) {
       _setTyping(false);
@@ -106,6 +140,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     _setTyping(true);
     _typingStopTimer = Timer(_typingIdle, () => _setTyping(false));
+  }
+
+  /// Saves the draft once the typing stops, not once per keystroke.
+  ///
+  /// Same reasoning as the typing indicator: a request per character would be
+  /// a request per character. The pause is longer here because a draft nobody
+  /// is looking at can afford to be a second behind.
+  void _scheduleDraftSave() {
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(_draftIdle, _saveDraft);
+  }
+
+  void _saveDraft() {
+    final String draft = _composer.text;
+    if (draft == _savedDraft) {
+      return;
+    }
+    _savedDraft = draft;
+    unawaited(ref.read(chatRepositoryProvider).saveDraft(widget.chatId, draft));
   }
 
   void _setTyping(bool typing) {
@@ -210,6 +263,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _typingStopTimer?.cancel();
+    // Leaving mid-sentence is exactly when a draft matters, so it is written
+    // now rather than waiting for a timer that is about to be cancelled.
+    _draftSaveTimer?.cancel();
+    _saveDraft();
     // Leaving the screen mid-sentence must clear the indicator, or the other
     // person is told someone is typing who has closed the conversation.
     if (_typing) {
@@ -233,6 +290,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Clear immediately: the message is already stored locally, so there is
     // nothing to roll back if the network is down.
     _composer.clear();
+    // The draft is the message now, so the stored one has to go — otherwise
+    // reopening the chat puts the sent text back in the box.
+    _draftSaveTimer?.cancel();
+    _savedDraft = '';
+    unawaited(ref.read(chatRepositoryProvider).saveDraft(widget.chatId, ''));
     await ref
         .read(chatRepositoryProvider)
         .sendText(chatId: widget.chatId, content: text);

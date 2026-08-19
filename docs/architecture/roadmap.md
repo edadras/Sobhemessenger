@@ -60,6 +60,7 @@ A feature is complete only when all of the following hold:
 | 34 | Named role bundles, read receipts, call sessions (§14, §7, §20) | done: a bundle resolved between the chat's defaults and a member's overrides, who has read one message, and one signalling row per participant so a reconnect does not start from nothing |
 | 35 | Article galleries and translations (§25) | done: an ordered gallery and a per-locale translation that is a draft until someone signs it off |
 | 36 | Clients for the surfaces nothing called | done: the sign-in log, close friends, live location updates, channel statistics, ownership transfer, editorial authors and spam scores — see below |
+| 38 | The last five | done: setting the two-step password, drafts that follow you between devices, reading one forum topic on its own, the breaking-news banner, and a past call's negotiation record |
 | 37 | The rest of the unreachable surfaces | done: redeeming an invite link, counting a channel post's views, data export and account deletion, the recovery flow itself, poll voters, secret-session records, community room removal, bans, operator roles, search reindexing, news categories, and the network a call leg is on |
 
 ## The endpoints nothing called
@@ -113,6 +114,25 @@ had been built the day before, and it displayed a `view_count` that nothing in
 the app incremented: it would have read zero for ever, on posts hundreds of
 people had opened. A screen that is wrong in a plausible direction is worse
 than one that is missing.
+
+A third pass closed the last five, and two of them were features with no way
+in at all. The app could *enter* a two-step password at sign-in and, once the
+recovery screen existed, *clear* a forgotten one — with no way to set one in
+the first place. A second factor nobody can turn on is not a second factor.
+And tapping a forum topic did nothing: the list showed how many messages each
+held, and opening one was not wired to anything, so a forum was a chat with
+labels on it.
+
+The self profile did not report whether two-step was on, either, so the
+settings screen could not have shown its own state. It does now.
+
+Syncing a draft turned out to be two halves. Pushing it was one line; the
+device also had to be willing to take one back, and `upsertChats` deliberately
+preserved the local draft column — correctly, since a refresh must not destroy
+a sentence in progress. The rule that resolves both: the server's draft fills
+an empty box and never overwrites a full one. That is what lets a sentence
+started on the desktop turn up on the phone, and it is the one piece of this
+work with enough judgement in it to be worth a test of its own.
 
 `scripts/verify/reachable_surfaces.py` is the probe that asks these questions
 from the client's side, and it is where all of them came from.

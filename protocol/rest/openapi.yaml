@@ -6253,6 +6253,17 @@ components:
           properties:
             phone_number: { type: string }
             birthday: { type: string, format: date-time, nullable: true }
+            two_step_enabled:
+              type: boolean
+              description: >
+                Whether a second factor guards this account. The owner has no
+                other way to ask; without it the only way to find out was to be
+                locked out at the next sign-in.
+            two_step_hint:
+              type: string
+              description: >
+                The reminder the owner chose, shown back to them. Absent when
+                there is none.
 
     ScheduledMessage:
       type: object

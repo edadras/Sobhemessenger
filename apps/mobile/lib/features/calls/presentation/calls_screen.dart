@@ -71,6 +71,14 @@ class _CallTile extends ConsumerWidget {
         : others.map((CallParticipant p) => p.displayName).take(3).join('، ');
 
     return ListTile(
+      // Opening a past call shows what each leg negotiated. It is the answer
+      // to "why was that one so bad?", and afterwards is the only time anyone
+      // asks — which is why the record is kept rather than only logged.
+      onTap: () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => CallDetailsSheet(call: call, title: title),
+      ),
       leading: SobhAvatar(name: title),
       title: Text(
         title.isEmpty ? direction : title,
@@ -122,5 +130,117 @@ class _CallTile extends ConsumerWidget {
     return duration.inHours > 0
         ? '${duration.inHours}:$minutes:$remaining'
         : '$minutes:$remaining';
+  }
+}
+
+/// What each side of a past call negotiated (§21).
+///
+/// Deliberately plain. It is a diagnostic, read by somebody who has just had a
+/// bad call, so it answers the two questions they actually have — who was on
+/// it and over what, and did the two sides ever manage to agree on a route —
+/// rather than presenting a protocol trace.
+class CallDetailsSheet extends ConsumerWidget {
+  const CallDetailsSheet({
+    super.key,
+    required this.call,
+    required this.title,
+  });
+
+  final Call call;
+  final String title;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+    final String? me = ref.watch(sessionControllerProvider).userId;
+    final AsyncValue<List<CallSession>> sessions =
+        ref.watch(callSessionsProvider(call.id));
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(SobhSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              l10n.callDetailsTitle,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            Text(
+              title,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: palette.textSecondary),
+            ),
+            const SizedBox(height: SobhSpacing.lg),
+            sessions.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.all(SobhSpacing.lg),
+                child: SobhLoading(),
+              ),
+              error: (Object error, StackTrace _) => SobhErrorState(
+                error: error,
+                onRetry: () => ref.invalidate(callSessionsProvider(call.id)),
+              ),
+              data: (List<CallSession> legs) {
+                if (legs.isEmpty) {
+                  return Text(
+                    l10n.callDetailsNothingRecorded,
+                    style: TextStyle(color: palette.textSecondary),
+                  );
+                }
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    for (final CallSession leg in legs)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          leg.negotiated
+                              ? Icons.check_circle_outline
+                              : Icons.error_outline,
+                          color: leg.negotiated
+                              ? palette.success
+                              : palette.error,
+                        ),
+                        title: Text(
+                          leg.userId == me
+                              ? l10n.callDetailsThisDevice
+                              : _nameOf(leg.userId, l10n),
+                        ),
+                        subtitle: Text(
+                          <String>[
+                            switch (leg.networkType) {
+                              'wifi' => l10n.callDetailsWifi,
+                              'cellular' => l10n.callDetailsCellular,
+                              'ethernet' => l10n.callDetailsEthernet,
+                              '' => l10n.callDetailsNetworkUnknown,
+                              _ => leg.networkType,
+                            },
+                            l10n.callDetailsRoutes(leg.candidateCount),
+                            if (!leg.negotiated) l10n.callDetailsIncomplete,
+                          ].join(' · '),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _nameOf(String userId, AppLocalizations l10n) {
+    for (final CallParticipant participant in call.participants) {
+      if (participant.userId == userId) {
+        return participant.displayName;
+      }
+    }
+    return l10n.callDetailsOtherSide;
   }
 }
