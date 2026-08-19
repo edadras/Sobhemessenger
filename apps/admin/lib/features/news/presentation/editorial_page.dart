@@ -5,6 +5,7 @@ import '../../../core/admin_api.dart';
 import '../../../main.dart';
 import '../../dashboard/presentation/admin_shell.dart';
 import 'article_detail_page.dart';
+import 'categories_page.dart';
 
 /// The newsroom queue (§25).
 class EditorialPage extends ConsumerStatefulWidget {
@@ -45,6 +46,18 @@ class _EditorialPageState extends ConsumerState<EditorialPage> {
           Row(
             children: <Widget>[
               Text('اخبار', style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(width: 16),
+              // Categories are what an article is filed under, so they belong
+              // beside the queue rather than in a section of their own.
+              TextButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const CategoriesPage(),
+                  ),
+                ),
+                icon: const Icon(Icons.folder_outlined),
+                label: const Text('دسته‌ها'),
+              ),
               const Spacer(),
               SegmentedButton<String>(
                 segments: const <ButtonSegment<String>>[

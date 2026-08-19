@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
@@ -163,16 +164,51 @@ class CallsRepository {
 
   /// Relays one SDP or ICE payload to another participant. The body is opaque
   /// to both this method and the server.
+  ///
+  /// The network this leg is on travels with it. It is not used to route
+  /// anything — it is recorded, because "was it on cellular?" is the first
+  /// question anyone asks about a call that went badly, and afterwards is too
+  /// late to find out.
   Future<void> signal({
     required String callId,
     required String to,
     required String type,
     required Object payload,
-  }) =>
-      _api.post<Map<String, dynamic>>(
-        '/calls/$callId/signal',
-        body: <String, dynamic>{'to': to, 'type': type, 'payload': payload},
-      );
+  }) async {
+    await _api.post<Map<String, dynamic>>(
+      '/calls/$callId/signal',
+      body: <String, dynamic>{
+        'to': to,
+        'type': type,
+        'payload': payload,
+        'network_type': await _networkType(),
+      },
+    );
+  }
+
+  /// What this device is connected over, in the vocabulary the server accepts.
+  ///
+  /// An empty string when it cannot be determined, which the server reads as
+  /// "this signal does not say" and leaves whatever it already had — better
+  /// than overwriting a known value with a guess.
+  Future<String> _networkType() async {
+    try {
+      final List<ConnectivityResult> result =
+          await Connectivity().checkConnectivity();
+      if (result.contains(ConnectivityResult.wifi)) {
+        return 'wifi';
+      }
+      if (result.contains(ConnectivityResult.mobile)) {
+        return 'cellular';
+      }
+      if (result.contains(ConnectivityResult.ethernet)) {
+        return 'ethernet';
+      }
+      return result.contains(ConnectivityResult.none) ? '' : 'other';
+    } on Object {
+      return '';
+    }
+  }
 
   Future<void> setMedia(
     String callId, {

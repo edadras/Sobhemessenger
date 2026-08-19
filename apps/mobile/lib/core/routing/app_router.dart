@@ -11,6 +11,7 @@ import '../../features/chat/presentation/chat_list_screen.dart';
 import '../../features/chat/presentation/chat_screen.dart';
 import '../../features/contacts/presentation/contacts_screen.dart';
 import '../../features/groups/presentation/chat_info_screen.dart';
+import '../../features/groups/presentation/join_by_link_screen.dart';
 import '../../features/news/presentation/news_feed_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/search/presentation/search_screen.dart';
@@ -37,6 +38,10 @@ abstract final class Routes {
   static const String search = '/search';
   static const String profile = '/profile';
   static const String settings = '/settings';
+
+  /// An invite link. The web build resolves one natively; on mobile the same
+  /// route is pushed from the "join by link" entry in search.
+  static const String joinByLink = '/join/:slug';
 }
 
 /// Wraps GoRouter so the provider exposes a stable object across rebuilds.
@@ -68,16 +73,32 @@ final Provider<GoRouterConfig> appRouterProvider =
           return null;
         }
         if (!signedIn && !onAuthRoute) {
-          return Routes.phoneEntry;
+          // Where they were going is remembered across sign-in. Without this
+          // an invite link opened by somebody not signed in evaporates: they
+          // authenticate and land on the chat list with no idea what they
+          // were invited to.
+          final String destination = state.uri.toString();
+          if (destination == Routes.splash) {
+            return Routes.phoneEntry;
+          }
+          return Uri(
+            path: Routes.phoneEntry,
+            queryParameters: <String, String>{'next': destination},
+          ).toString();
         }
-        if (signedIn &&
-            (onAuthRoute || state.matchedLocation == Routes.splash)) {
-          return Routes.chats;
+        if (signedIn && (onAuthRoute || state.matchedLocation == Routes.splash)) {
+          final String? next = state.uri.queryParameters['next'];
+          return next != null && next.isNotEmpty ? next : Routes.chats;
         }
         return null;
       },
       routes: <RouteBase>[
         GoRoute(path: Routes.splash, builder: (_, __) => const _SplashScreen()),
+        GoRoute(
+          path: Routes.joinByLink,
+          builder: (BuildContext context, GoRouterState state) =>
+              JoinByLinkScreen(slug: state.pathParameters['slug']),
+        ),
         GoRoute(
           path: Routes.phoneEntry,
           builder: (_, __) => const PhoneEntryScreen(),

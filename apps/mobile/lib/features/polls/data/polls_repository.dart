@@ -139,6 +139,47 @@ class PollsRepository {
   Future<Poll> close(String pollId) async => Poll.fromJson(
         await _api.post<Map<String, dynamic>>('/polls/$pollId/close'),
       );
+
+  /// Who chose one option (§18).
+  ///
+  /// Only for a poll that is not anonymous — the server refuses otherwise,
+  /// which is the guarantee an anonymous poll makes. The screen does not offer
+  /// this for one, so the refusal is a backstop rather than the normal path.
+  Future<List<PollVoter>> voters(String pollId, String optionId) async {
+    final Map<String, dynamic> data = await _api.get<Map<String, dynamic>>(
+      '/polls/$pollId/options/$optionId/voters',
+    );
+    return <PollVoter>[
+      for (final dynamic entry
+          in data['voters'] as List<dynamic>? ?? const <dynamic>[])
+        PollVoter.fromJson(entry as Map<String, dynamic>),
+    ];
+  }
+}
+
+/// One person who chose an option, and when.
+class PollVoter {
+  const PollVoter({
+    required this.userId,
+    required this.displayName,
+    required this.votedAt,
+    this.username,
+    this.avatarMediaId,
+  });
+
+  factory PollVoter.fromJson(Map<String, dynamic> json) => PollVoter(
+        userId: json['user_id'] as String,
+        displayName: json['display_name'] as String? ?? '',
+        votedAt: DateTime.parse(json['voted_at'] as String).toLocal(),
+        username: json['username'] as String?,
+        avatarMediaId: json['avatar_media_id'] as String?,
+      );
+
+  final String userId;
+  final String displayName;
+  final DateTime votedAt;
+  final String? username;
+  final String? avatarMediaId;
 }
 
 final Provider<PollsRepository> pollsRepositoryProvider =
@@ -149,4 +190,11 @@ final Provider<PollsRepository> pollsRepositoryProvider =
 final FutureProviderFamily<Poll, String> pollProvider =
     FutureProvider.family<Poll, String>(
   (Ref ref, String pollId) => ref.watch(pollsRepositoryProvider).get(pollId),
+);
+
+final FutureProviderFamily<List<PollVoter>, (String, String)>
+    pollVotersProvider =
+    FutureProvider.family<List<PollVoter>, (String, String)>(
+  (Ref ref, (String, String) key) =>
+      ref.watch(pollsRepositoryProvider).voters(key.$1, key.$2),
 );

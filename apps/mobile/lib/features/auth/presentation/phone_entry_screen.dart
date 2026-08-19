@@ -50,7 +50,19 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
       if (!mounted) {
         return;
       }
-      context.go('${Routes.verifyCode}?phone=${Uri.encodeComponent(phone)}');
+      // `next` is carried through both steps, so a link that sent someone
+      // here still decides where they land once they are signed in.
+      final String? next =
+          GoRouterState.of(context).uri.queryParameters['next'];
+      context.go(
+        Uri(
+          path: Routes.verifyCode,
+          queryParameters: <String, String>{
+            'phone': phone,
+            if (next != null && next.isNotEmpty) 'next': next,
+          },
+        ).toString(),
+      );
     } on ApiException catch (error) {
       if (!mounted) {
         return;

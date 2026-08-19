@@ -645,5 +645,75 @@
   },
   "groupsTransferOwnershipConfirmAction": "واگذار کن",
   "groupsTransferOwnershipDone": "مالکیت واگذار شد",
-  "locationLiveStop": "توقف اشتراک موقعیت"
+  "locationLiveStop": "توقف اشتراک موقعیت",
+  "joinByLinkTitle": "پیوستن با پیوند دعوت",
+  "joinByLinkBody": "پیوندی که برایتان فرستاده شده را اینجا بگذارید",
+  "joinByLinkField": "پیوند یا شناسهٔ دعوت",
+  "joinByLinkAction": "پیوستن",
+  "joinByLinkPendingTitle": "درخواست شما ثبت شد",
+  "joinByLinkPendingBody": "این گفتگو عضوهایش را بررسی می‌کند. پس از تأیید، گفتگو در فهرست شما ظاهر می‌شود.",
+  "dataRightsTitle": "داده‌های شما",
+  "dataRightsSubtitle": "گرفتن رونوشت، یا حذف حساب",
+  "dataExportTitle": "رونوشت داده‌ها",
+  "dataExportBody": "یک فایل خوانا از آنچه حسابتان نگه می‌دارد — پیام‌های خودتان، نه گفتگوهایی که در آن بوده‌اید.",
+  "dataExportAction": "درخواست",
+  "dataExportDownload": "دریافت",
+  "dataDeleteTitle": "حذف حساب",
+  "dataDeleteAction": "حذف حساب",
+  "dataDeleteWithdraw": "بازپس‌گیری",
+  "dataDeletePendingTitle": "حذف حساب در انتظار است",
+  "dataRequestsHistory": "درخواست‌های پیشین",
+  "dataStatusPending": "در صف",
+  "dataStatusProcessing": "در حال انجام",
+  "dataStatusReady": "آماده",
+  "dataStatusCompleted": "انجام شد",
+  "dataStatusCancelled": "لغو شد",
+  "dataStatusFailed": "ناموفق",
+  "dataDeleteBody": "{days} روز فرصت بازپس‌گیری دارید و تا آن زمان حسابتان کار می‌کند.",
+  "@dataDeleteBody": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "dataDeleteConfirm": "حساب شما پس از {days} روز برای همیشه حذف می‌شود. تا آن زمان می‌توانید این درخواست را پس بگیرید و حسابتان عادی کار می‌کند.",
+  "@dataDeleteConfirm": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "dataDeletePendingBody": "در {date} انجام می‌شود",
+  "@dataDeletePendingBody": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "recoveryTitle": "بازیابی حساب",
+  "recoveryForgotPassword": "رمز دومرحله‌ای را فراموش کرده‌اید؟",
+  "recoveryBody": "نشانی ایمیلی که برای بازیابی ثبت کرده‌اید را وارد کنید. کدی به آن فرستاده می‌شود.",
+  "recoveryEmailField": "نشانی ایمیل",
+  "recoveryCodeField": "کد",
+  "recoverySend": "فرستادن کد",
+  "recoveryConfirm": "تأیید",
+  "recoveryCodeSent": "اگر این نشانی روی حسابی ثبت شده باشد، کدی برایش فرستاده شد.",
+  "recoveryCodeWrong": "کد درست نیست یا منقضی شده",
+  "recoveryDoneTitle": "رمز دومرحله‌ای برداشته شد",
+  "recoveryDoneBody": "همهٔ نشست‌های قبلی هم بسته شدند. حالا با شمارهٔ تلفن و کد پیامکی وارد شوید.",
+  "recoveryBackToSignIn": "بازگشت به ورود",
+  "pollsVotersTitle": "رأی‌دهندگان",
+  "pollsVotersEmpty": "هنوز کسی این گزینه را انتخاب نکرده",
+  "communitiesRemoveRoom": "برداشتن اتاق",
+  "communitiesRemoveRoomConfirm": "«{title}» از این انجمن برداشته می‌شود. خودِ گفتگو و پیام‌هایش می‌مانند.",
+  "@communitiesRemoveRoomConfirm": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  }
 }

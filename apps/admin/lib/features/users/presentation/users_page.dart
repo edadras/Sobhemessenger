@@ -51,6 +51,49 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     }
   }
 
+  /// Grants and revokes operator roles.
+  ///
+  /// The panel could show which roles someone held and not change them, so an
+  /// operator was appointed by editing the database. What each role may do is
+  /// the role's business — the panel names it, the server holds the permission
+  /// list, and a role added there appears here without a release.
+  Future<void> _manageRoles(Map<String, dynamic> user) async {
+    final AdminApi api = ref.read(adminApiProvider);
+    final String userId = user['id'] as String;
+    final List<String> held = <String>[
+      for (final dynamic role
+          in user['admin_roles'] as List<dynamic>? ?? const <dynamic>[])
+        role as String,
+    ];
+
+    final _RoleChange? change = await showDialog<_RoleChange>(
+      context: context,
+      builder: (BuildContext context) => _RolesDialog(
+        name: user['display_name'] as String? ?? userId,
+        held: held,
+      ),
+    );
+    if (change == null) {
+      return;
+    }
+
+    try {
+      if (change.grant) {
+        await api.grantRole(userId, change.role);
+      } else {
+        await api.revokeRole(userId, change.role);
+      }
+      if (mounted) {
+        _reload();
+      }
+    } on AdminApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    }
+  }
+
   /// Shows the anti-spam score held against an account, and offers to lift it.
   ///
   /// The score is what silently restricts someone before any moderator has
@@ -164,6 +207,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     onChangeStatus: (String status) =>
                         _changeStatus(user['id'] as String, status),
                     onShowSpamScore: () => _showSpamScore(user),
+                    onManageRoles: () => _manageRoles(user),
                   );
                 },
               ),
@@ -180,11 +224,13 @@ class _UserRow extends StatelessWidget {
     required this.user,
     required this.onChangeStatus,
     required this.onShowSpamScore,
+    required this.onManageRoles,
   });
 
   final Map<String, dynamic> user;
   final void Function(String status) onChangeStatus;
   final VoidCallback onShowSpamScore;
+  final VoidCallback onManageRoles;
 
   @override
   Widget build(BuildContext context) {
@@ -230,6 +276,11 @@ class _UserRow extends StatelessWidget {
             onPressed: onShowSpamScore,
             icon: const Icon(Icons.report_gmailerrorred_outlined),
             tooltip: 'امتیاز ضدهرزنامه',
+          ),
+          IconButton(
+            onPressed: onManageRoles,
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            tooltip: 'نقش‌های اپراتوری',
           ),
           const SizedBox(width: 8),
           PopupMenuButton<String>(
@@ -381,6 +432,79 @@ class _SpamScoreDialog extends StatelessWidget {
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('برداشتن محدودیت'),
           ),
+      ],
+    );
+  }
+}
+
+class _RoleChange {
+  const _RoleChange({required this.role, required this.grant});
+
+  final String role;
+  final bool grant;
+}
+
+/// Operator roles on one account.
+///
+/// The keys match `admin_roles` in the schema, which is where the permissions
+/// behind each one live. Naming them here and nowhere else would be a second
+/// list to keep in step; what this holds is only the label a person reads.
+class _RolesDialog extends StatelessWidget {
+  const _RolesDialog({required this.name, required this.held});
+
+  final String name;
+  final List<String> held;
+
+  static const Map<String, String> _roles = <String, String>{
+    'super_admin': 'مدیر ارشد — دسترسی کامل',
+    'administrator': 'مدیر سامانه',
+    'moderator': 'ناظر — گزارش‌ها و محرومیت‌ها',
+    'news_editor': 'سردبیر اخبار',
+    'news_author': 'نویسندهٔ اخبار',
+    'support': 'پشتیبانی — فقط خواندن',
+    'analytics': 'تحلیل — فقط سنجه‌ها',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('نقش‌های اپراتوری — $name'),
+      content: SizedBox(
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (final MapEntry<String, String> role in _roles.entries)
+              ListTile(
+                leading: Icon(
+                  held.contains(role.key)
+                      ? Icons.check_circle
+                      : Icons.circle_outlined,
+                ),
+                title: Text(role.value),
+                subtitle: Text(
+                  role.key,
+                  textDirection: TextDirection.ltr,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                // One change per visit. Batching them would mean deciding what
+                // to do when the third of four is refused, and each grant is
+                // its own audit entry anyway.
+                onTap: () => Navigator.of(context).pop(
+                  _RoleChange(
+                    role: role.key,
+                    grant: !held.contains(role.key),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('بستن'),
+        ),
       ],
     );
   }

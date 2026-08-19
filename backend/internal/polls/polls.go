@@ -278,8 +278,23 @@ func (r *Repository) Close(ctx context.Context, pollID, actorID uuid.UUID) error
 	return nil
 }
 
+// Voter is one person who chose an option, as the list that shows them needs
+// it.
+//
+// The name travels with the id. A list of bare UUIDs is not something anyone
+// can read, and every client would otherwise have to fetch each profile
+// separately to render a row — which is the same join, done once per voter,
+// over the network.
+type Voter struct {
+	UserID      uuid.UUID  `json:"user_id"`
+	DisplayName string     `json:"display_name"`
+	Username    *string    `json:"username,omitempty"`
+	AvatarID    *uuid.UUID `json:"avatar_media_id,omitempty"`
+	VotedAt     time.Time  `json:"voted_at"`
+}
+
 // Voters lists who chose an option. Anonymous polls never reveal this.
-func (r *Repository) Voters(ctx context.Context, pollID, optionID uuid.UUID, limit int) ([]uuid.UUID, error) {
+func (r *Repository) Voters(ctx context.Context, pollID, optionID uuid.UUID, limit int) ([]Voter, error) {
 	var isAnonymous bool
 	if err := r.db.Pool.QueryRow(ctx,
 		`SELECT is_anonymous FROM polls WHERE id = $1`, pollID).Scan(&isAnonymous); err != nil {
@@ -293,21 +308,27 @@ func (r *Repository) Voters(ctx context.Context, pollID, optionID uuid.UUID, lim
 	}
 
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT user_id FROM poll_votes
-		WHERE poll_id = $1 AND option_id = $2
-		ORDER BY created_at LIMIT $3`, pollID, optionID, limit)
+		SELECT v.user_id, COALESCE(p.display_name, ''), u.username,
+		       p.avatar_media_id, v.created_at
+		FROM poll_votes v
+		JOIN users u ON u.id = v.user_id AND u.deleted_at IS NULL
+		LEFT JOIN user_profiles p ON p.user_id = v.user_id
+		WHERE v.poll_id = $1 AND v.option_id = $2
+		ORDER BY v.created_at LIMIT $3`, pollID, optionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("polls: list voters: %w", err)
 	}
 	defer rows.Close()
 
-	var voters []uuid.UUID
+	// Empty rather than nil, so an option nobody picked answers with a list.
+	voters := []Voter{}
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var voter Voter
+		if err := rows.Scan(&voter.UserID, &voter.DisplayName, &voter.Username,
+			&voter.AvatarID, &voter.VotedAt); err != nil {
 			return nil, err
 		}
-		voters = append(voters, id)
+		voters = append(voters, voter)
 	}
 	return voters, rows.Err()
 }
@@ -446,7 +467,7 @@ func (s *Service) Close(ctx context.Context, pollID, actorID uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) Voters(ctx context.Context, pollID, optionID uuid.UUID) ([]uuid.UUID, error) {
+func (s *Service) Voters(ctx context.Context, pollID, optionID uuid.UUID) ([]Voter, error) {
 	voters, err := s.repo.Voters(ctx, pollID, optionID, 500)
 	if err != nil {
 		switch {

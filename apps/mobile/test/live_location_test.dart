@@ -120,8 +120,10 @@ void main() {
         ),
       );
 
-      final String until =
-          DateTime.now().toUtc().add(const Duration(hours: 1)).toIso8601String();
+      final String until = DateTime.now()
+          .toUtc()
+          .add(const Duration(hours: 1))
+          .toIso8601String();
       await db.confirmMessage(
         clientMessageId: 'client-m3',
         serverId: 'server-m3',
@@ -184,8 +186,11 @@ void main() {
 
       final String body = source.readAsStringSync();
       final int start = body.indexOf('var PermissionKeys = map[string]string{');
-      expect(start, greaterThan(-1),
-          reason: 'the server no longer declares PermissionKeys as expected');
+      expect(
+        start,
+        greaterThan(-1),
+        reason: 'the server no longer declares PermissionKeys as expected',
+      );
       final int end = body.indexOf('\n}', start);
       final String block = body.substring(start, end);
 

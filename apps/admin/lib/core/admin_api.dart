@@ -100,6 +100,74 @@ class AdminApi {
         <String, String>{'status': status},
       );
 
+  // ----------------------------------------------------------------- bans
+
+  Future<List<dynamic>> bans({int limit = 50, int offset = 0}) async {
+    final Map<String, dynamic> data = await _get<Map<String, dynamic>>(
+      '/admin/bans?limit=$limit&offset=$offset',
+    );
+    return data['bans'] as List<dynamic>? ?? const <dynamic>[];
+  }
+
+  /// Bans an account, a chat, or an account within one chat.
+  ///
+  /// [expiresAt] absent means indefinite. The distinction is the whole point
+  /// of the field: a ban with an end date is a suspension, one without is
+  /// permanent, and the panel should not have to guess which it just issued.
+  Future<String> createBan({
+    required String scope,
+    required String reason,
+    String? userId,
+    String? chatId,
+    DateTime? expiresAt,
+  }) async {
+    final Map<String, dynamic> data = await _post<Map<String, dynamic>>(
+      '/admin/bans',
+      <String, dynamic>{
+        'scope': scope,
+        'reason': reason,
+        if (userId != null) 'user_id': userId,
+        if (chatId != null) 'chat_id': chatId,
+        if (expiresAt != null)
+          'expires_at': expiresAt.toUtc().toIso8601String(),
+      },
+    );
+    return data['ban_id'] as String? ?? '';
+  }
+
+  Future<void> liftBan(String banId) =>
+      _send('/admin/bans/$banId', 'DELETE', const <String, dynamic>{});
+
+  // --------------------------------------------------------- operator roles
+
+  /// Grants an operator role. What the role may do is the role's business —
+  /// the panel names it, the server holds the permission list.
+  Future<void> grantRole(String userId, String role) => _send(
+        '/admin/users/$userId/roles',
+        'POST',
+        <String, String>{'role': role},
+      );
+
+  Future<void> revokeRole(String userId, String roleKey) => _send(
+        '/admin/users/$userId/roles/$roleKey',
+        'DELETE',
+        const <String, dynamic>{},
+      );
+
+  // --------------------------------------------------------- search indices
+
+  /// Rebuilds one search index from PostgreSQL.
+  ///
+  /// The database is the source of truth and the index is a derived copy, so
+  /// this is the repair for a copy that has drifted — after a restore, or a
+  /// spell when the indexer was down. It is slow and it is meant to be: it
+  /// walks the table.
+  Future<void> reindex(String index) => _send(
+        '/admin/search/reindex/$index',
+        'POST',
+        const <String, dynamic>{},
+      );
+
   // ------------------------------------------------------------- newsroom
 
   Future<List<dynamic>> authors() async {
@@ -189,6 +257,41 @@ class AdminApi {
         const <String, dynamic>{},
       );
 
+  Future<List<dynamic>> categories() async {
+    final Map<String, dynamic> data =
+        await _get<Map<String, dynamic>>('/editorial/categories');
+    return data['categories'] as List<dynamic>? ?? const <dynamic>[];
+  }
+
+  /// Creates or edits a category.
+  ///
+  /// The upsert keys on the slug, and the names are per locale — a category is
+  /// one thing with a name in each language the app ships, not one category
+  /// per translation.
+  Future<void> saveCategory({
+    required String slug,
+    required Map<String, String> names,
+    int position = 0,
+    bool isActive = true,
+  }) =>
+      _send('/editorial/categories', 'PUT', <String, dynamic>{
+        'slug': slug,
+        'names': names,
+        'position': position,
+        'is_active': isActive,
+      });
+
+  /// Deletes a category.
+  ///
+  /// The server refuses one that still has articles filed under it, so this
+  /// cannot orphan a story — the refusal is the answer, and the panel shows
+  /// it rather than pre-empting it with a rule of its own that could drift.
+  Future<void> deleteCategory(String categoryId) => _send(
+        '/editorial/categories/$categoryId',
+        'DELETE',
+        const <String, dynamic>{},
+      );
+
   // ------------------------------------------------------------- anti-spam
 
   /// The spam score held against one account.
@@ -203,6 +306,18 @@ class AdminApi {
   /// recorded here beyond making the call.
   Future<void> liftSpamScore(String userId) =>
       _send('/admin/spam-scores/$userId', 'DELETE', const <String, dynamic>{});
+
+  /// A POST whose answer the caller needs. `_send` discards the body, which
+  /// is right for the calls that only report success and wrong for one that
+  /// hands back an id.
+  Future<T> _post<T>(String path, Object body) async {
+    final Response<dynamic> response = await _dio.post<dynamic>(
+      path,
+      data: body,
+      options: _options,
+    );
+    return _unwrap<T>(response);
+  }
 
   Future<T> _get<T>(String path) async {
     final Response<dynamic> response =

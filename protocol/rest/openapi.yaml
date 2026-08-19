@@ -4134,7 +4134,23 @@ paths:
                       data:
                         type: object
                         properties:
-                          voters: { type: array, items: { type: string, format: uuid } }
+                          voters:
+                            type: array
+                            description: >
+                              In the order people voted. The name travels with
+                              the id: a list of bare UUIDs is not something a
+                              screen can render, and fetching each profile
+                              separately would be the same join done once per
+                              voter over the network.
+                            items:
+                              type: object
+                              required: [user_id, display_name, voted_at]
+                              properties:
+                                user_id: { type: string, format: uuid }
+                                display_name: { type: string }
+                                username: { type: string }
+                                avatar_media_id: { type: string, format: uuid }
+                                voted_at: { type: string, format: date-time }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: The poll is anonymous
@@ -4312,6 +4328,16 @@ paths:
               properties:
                 to: { type: string, format: uuid }
                 type: { type: string, enum: [offer, answer, ice-candidate] }
+                network_type:
+                  type: string
+                  enum: [wifi, cellular, ethernet, other]
+                  description: >
+                    What this leg is connected over. Optional — a client that
+                    cannot tell omits it, and the stored value is left as it
+                    was rather than overwritten with a guess. It is recorded,
+                    not used for routing: "was it on cellular?" is the first
+                    question about a call that went badly, and afterwards is
+                    too late to find out.
                 payload: { type: object, additionalProperties: true }
       responses:
         "200":
@@ -4354,6 +4380,11 @@ paths:
                                 user_id: { type: string, format: uuid }
                                 device_id: { type: string, format: uuid, nullable: true }
                                 ws_node: { type: string }
+                                network_type:
+                                  type: string
+                                  description: >
+                                    What the leg reported it was on. Absent
+                                    when no signal from it ever said.
                                 has_offer: { type: boolean }
                                 has_answer: { type: boolean }
                                 candidate_count: { type: integer }

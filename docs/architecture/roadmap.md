@@ -60,6 +60,7 @@ A feature is complete only when all of the following hold:
 | 34 | Named role bundles, read receipts, call sessions (§14, §7, §20) | done: a bundle resolved between the chat's defaults and a member's overrides, who has read one message, and one signalling row per participant so a reconnect does not start from nothing |
 | 35 | Article galleries and translations (§25) | done: an ordered gallery and a per-locale translation that is a draft until someone signs it off |
 | 36 | Clients for the surfaces nothing called | done: the sign-in log, close friends, live location updates, channel statistics, ownership transfer, editorial authors and spam scores — see below |
+| 37 | The rest of the unreachable surfaces | done: redeeming an invite link, counting a channel post's views, data export and account deletion, the recovery flow itself, poll voters, secret-session records, community room removal, bans, operator roles, search reindexing, news categories, and the network a call leg is on |
 
 ## The endpoints nothing called
 
@@ -95,8 +96,26 @@ and had no effect, which is exactly how the second half stayed invisible. And
 an `ON CONFLICT DO NOTHING ... RETURNING` are not one atomic step — two API
 nodes starting together is the ordinary case, not a rare one.
 
+A second pass over the same question found the rest, and two more defects with
+it. Redeeming an invite link worked on the server and no application could do
+it, so an invite was a string somebody could send and nobody could use —
+including, until this, somebody who opened one while signed out, because the
+sign-in bounce discarded where they had been going. And the handler validating
+a call signal accepted `ice-candidate` while the repository that stored one
+matched `candidate`: every candidate fell through to the default branch and was
+never written, so a session record showed offers and answers with no candidates
+at all. That reads as a call that gathered none, rather than as two layers
+spelling the same word differently — which is why the vocabulary is now three
+constants named once.
+
+Counting a channel post's views is worth its own note. The statistics screen
+had been built the day before, and it displayed a `view_count` that nothing in
+the app incremented: it would have read zero for ever, on posts hundreds of
+people had opened. A screen that is wrong in a plausible direction is worse
+than one that is missing.
+
 `scripts/verify/reachable_surfaces.py` is the probe that asks these questions
-from the client's side, and it is where the first and the last two came from.
+from the client's side, and it is where all of them came from.
 
 ## Secret chats (§24)
 

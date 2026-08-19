@@ -341,9 +341,15 @@ func (r *Repository) History(ctx context.Context, userID uuid.UUID, limit int) (
 // The payloads are stored exactly as they were relayed. Nothing here parses
 // SDP or interprets a candidate — the server does not, must not, and the
 // column comment says so.
-func (r *Repository) RecordSignal(ctx context.Context, callID, userID uuid.UUID, deviceID *uuid.UUID, node, signalType string, payload []byte) error {
+func (r *Repository) RecordSignal(ctx context.Context, callID, userID uuid.UUID, deviceID *uuid.UUID, node, signalType, networkType string, payload []byte) error {
+	// The names the API validates are the names recorded. They used to differ
+	// by one — the handler accepted `ice-candidate` and this matched
+	// `candidate` — so every candidate fell through to the default and was
+	// silently not written. The session record then showed offers and answers
+	// with no candidates at all, which reads as a call that never gathered
+	// any rather than as a spelling mistake.
 	switch signalType {
-	case "offer", "answer", "candidate":
+	case SignalOffer, SignalAnswer, SignalCandidate:
 	default:
 		// Anything else is relayed and not recorded: the table has columns
 		// for these three and inventing a fourth meaning would be guessing.
@@ -355,19 +361,25 @@ func (r *Repository) RecordSignal(ctx context.Context, callID, userID uuid.UUID,
 	// since candidates keep arriving.
 	_, err := r.db.Pool.Exec(ctx, `
 		INSERT INTO call_sessions (call_id, user_id, device_id, ws_node,
-		                           sdp_offer, sdp_answer, ice_candidates)
-		VALUES ($1, $2, $3, $4,
+		                           network_type, sdp_offer, sdp_answer,
+		                           ice_candidates)
+		VALUES ($1, $2, $3, $4, $7,
 		        CASE WHEN $5 = 'offer' THEN $6::text END,
 		        CASE WHEN $5 = 'answer' THEN $6::text END,
-		        CASE WHEN $5 = 'candidate'
+		        CASE WHEN $5 = 'ice-candidate'
 		             THEN jsonb_build_array($6::jsonb) ELSE '[]'::jsonb END)
 		ON CONFLICT (call_id, user_id) DO UPDATE
 		SET device_id = COALESCE(EXCLUDED.device_id, call_sessions.device_id),
 		    ws_node = EXCLUDED.ws_node,
+		    -- Kept when this signal did not say. A leg that reported wifi on
+		    -- its offer and said nothing on its candidates is still on wifi.
+		    network_type = CASE WHEN EXCLUDED.network_type = ''
+		                        THEN call_sessions.network_type
+		                        ELSE EXCLUDED.network_type END,
 		    sdp_offer = COALESCE(EXCLUDED.sdp_offer, call_sessions.sdp_offer),
 		    sdp_answer = COALESCE(EXCLUDED.sdp_answer, call_sessions.sdp_answer),
 		    ice_candidates = call_sessions.ice_candidates || EXCLUDED.ice_candidates`,
-		callID, userID, deviceID, node, signalType, payload)
+		callID, userID, deviceID, node, signalType, payload, networkType)
 	if err != nil {
 		return fmt.Errorf("calls: record signal: %w", err)
 	}
@@ -387,10 +399,22 @@ func (r *Repository) CloseSessions(ctx context.Context, callID uuid.UUID) error 
 }
 
 // Session is one participant's side of a call, for diagnosis.
+// The three signal kinds that have a column of their own. Named once, because
+// the API validating one spelling while the repository stored another is
+// exactly how ICE candidates went unrecorded.
+const (
+	SignalOffer     = "offer"
+	SignalAnswer    = "answer"
+	SignalCandidate = "ice-candidate"
+)
+
 type Session struct {
-	UserID         uuid.UUID  `json:"user_id"`
-	DeviceID       *uuid.UUID `json:"device_id,omitempty"`
-	Node           string     `json:"ws_node,omitempty"`
+	UserID   uuid.UUID  `json:"user_id"`
+	DeviceID *uuid.UUID `json:"device_id,omitempty"`
+	Node     string     `json:"ws_node,omitempty"`
+	// NetworkType is what the leg reported it was on — `wifi`, `cellular`.
+	// It is the first thing anyone asks about a call that went badly.
+	NetworkType    string     `json:"network_type,omitempty"`
 	HasOffer       bool       `json:"has_offer"`
 	HasAnswer      bool       `json:"has_answer"`
 	CandidateCount int        `json:"candidate_count"`
@@ -406,7 +430,7 @@ type Session struct {
 // call for no benefit to the caller.
 func (r *Repository) Sessions(ctx context.Context, callID uuid.UUID) ([]Session, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT user_id, device_id, ws_node,
+		SELECT user_id, device_id, ws_node, network_type,
 		       sdp_offer IS NOT NULL, sdp_answer IS NOT NULL,
 		       jsonb_array_length(ice_candidates), created_at, closed_at
 		FROM call_sessions WHERE call_id = $1 ORDER BY created_at`, callID)
@@ -419,8 +443,9 @@ func (r *Repository) Sessions(ctx context.Context, callID uuid.UUID) ([]Session,
 	for rows.Next() {
 		var session Session
 		if err := rows.Scan(&session.UserID, &session.DeviceID, &session.Node,
-			&session.HasOffer, &session.HasAnswer, &session.CandidateCount,
-			&session.CreatedAt, &session.ClosedAt); err != nil {
+			&session.NetworkType, &session.HasOffer, &session.HasAnswer,
+			&session.CandidateCount, &session.CreatedAt,
+			&session.ClosedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, session)
@@ -609,7 +634,7 @@ func (s *Service) End(ctx context.Context, callID, userID uuid.UUID, reason stri
 //
 // The payload is passed through untouched: the server has no business parsing
 // session descriptions, and doing so would only create a place for it to break.
-func (s *Service) Signal(ctx context.Context, callID, fromUserID, toUserID uuid.UUID, signalType string, payload any) error {
+func (s *Service) Signal(ctx context.Context, callID, fromUserID, toUserID uuid.UUID, signalType, networkType string, payload any) error {
 	if err := s.requireParticipant(ctx, callID, fromUserID); err != nil {
 		return err
 	}
@@ -625,7 +650,7 @@ func (s *Service) Signal(ctx context.Context, callID, fromUserID, toUserID uuid.
 	// call that cannot be written down is still a call that must connect.
 	if raw, err := json.Marshal(payload); err == nil {
 		if err := s.repo.RecordSignal(ctx, callID, fromUserID, nil,
-			s.nodeID, signalType, raw); err != nil {
+			s.nodeID, signalType, networkType, raw); err != nil {
 			s.logger.Warn("could not record a call signal",
 				slog.String("call_id", callID.String()), slog.Any("error", err))
 		}
@@ -921,24 +946,35 @@ func (h *Handler) signal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		To      uuid.UUID `json:"to"`
-		Type    string    `json:"type"`
-		Payload any       `json:"payload"`
+		To   uuid.UUID `json:"to"`
+		Type string    `json:"type"`
+		// NetworkType is what this leg is on. Optional — a client that does
+		// not know says nothing rather than guessing, and the stored value is
+		// left as it was.
+		NetworkType string `json:"network_type,omitempty"`
+		Payload     any    `json:"payload"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	switch body.Type {
-	case "offer", "answer", "ice-candidate":
+	case SignalOffer, SignalAnswer, SignalCandidate:
 	default:
 		httpx.Fail(w, r, httpx.Validation("Unsupported signal type").
 			WithField("type", "must be offer, answer or ice-candidate"))
 		return
 	}
+	switch body.NetworkType {
+	case "", "wifi", "cellular", "ethernet", "other":
+	default:
+		httpx.Fail(w, r, httpx.Validation("Unsupported network type").
+			WithField("network_type", "must be wifi, cellular, ethernet or other"))
+		return
+	}
 
 	if err := h.service.Signal(r.Context(), callID, principal.UserID,
-		body.To, body.Type, body.Payload); err != nil {
+		body.To, body.Type, body.NetworkType, body.Payload); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}

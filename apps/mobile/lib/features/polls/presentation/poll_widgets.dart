@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/network/api_exception.dart';
@@ -69,6 +70,22 @@ class _PollViewState extends ConsumerState<PollView> {
               selected: _pending.contains(option.id) ||
                   data.myVotes.contains(option.id),
               enabled: !data.isClosed && !_submitting,
+              // Who chose an option is only knowable once the results are
+              // visible, and only when the poll is not anonymous — that is
+              // exactly the promise an anonymous poll makes, so the row does
+              // not offer it rather than letting the server refuse.
+              onShowVoters: !data.isAnonymous &&
+                      data.showsResults &&
+                      option.voteCount > 0
+                  ? () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => PollVotersScreen(
+                            pollId: data.id,
+                            option: option,
+                          ),
+                        ),
+                      )
+                  : null,
               onTap: () {
                 if (data.allowsMultiple) {
                   setState(() {
@@ -118,6 +135,7 @@ class _PollOptionRow extends StatelessWidget {
     required this.selected,
     required this.enabled,
     required this.onTap,
+    this.onShowVoters,
   });
 
   final Poll poll;
@@ -125,6 +143,10 @@ class _PollOptionRow extends StatelessWidget {
   final bool selected;
   final bool enabled;
   final VoidCallback onTap;
+
+  /// Null when this poll cannot say who voted — anonymous, or results still
+  /// hidden.
+  final VoidCallback? onShowVoters;
 
   @override
   Widget build(BuildContext context) {
@@ -157,6 +179,13 @@ class _PollOptionRow extends StatelessWidget {
                 ),
                 const SizedBox(width: SobhSpacing.sm),
                 Expanded(child: Text(option.text)),
+                if (onShowVoters != null)
+                  IconButton(
+                    onPressed: onShowVoters,
+                    icon: const Icon(Icons.people_outline),
+                    visualDensity: VisualDensity.compact,
+                    tooltip: AppLocalizations.of(context).pollsVotersTitle,
+                  ),
                 if (poll.showsResults)
                   Text(
                     '${(poll.shareOf(option) * 100).round()}%',
@@ -332,6 +361,90 @@ class _CreatePollScreenState extends ConsumerState<CreatePollScreen> {
               child: Text(_error!, style: TextStyle(color: palette.error)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Who chose one option (§18).
+///
+/// Reached only from a poll that is not anonymous. The list is the server's
+/// answer verbatim — including the order, which is the order people voted in,
+/// because "who was first" is part of what a visible poll is for.
+class PollVotersScreen extends ConsumerWidget {
+  const PollVotersScreen({
+    super.key,
+    required this.pollId,
+    required this.option,
+  });
+
+  final String pollId;
+  final PollOption option;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final SobhPalette palette = SobhTheme.of(context);
+    final AsyncValue<List<PollVoter>> voters =
+        ref.watch(pollVotersProvider((pollId, option.id)));
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(l10n.pollsVotersTitle),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(28),
+          child: Padding(
+            padding: const EdgeInsets.only(
+              bottom: SobhSpacing.sm,
+              left: SobhSpacing.lg,
+              right: SobhSpacing.lg,
+            ),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                option.text,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: palette.textSecondary),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: voters.when(
+        loading: () => const SobhLoading(),
+        error: (Object error, StackTrace _) => SobhErrorState(
+          error: error,
+          onRetry: () =>
+              ref.invalidate(pollVotersProvider((pollId, option.id))),
+        ),
+        data: (List<PollVoter> rows) {
+          if (rows.isEmpty) {
+            return SobhEmptyState(
+              icon: Icons.how_to_vote_outlined,
+              title: l10n.pollsVotersEmpty,
+            );
+          }
+          return ListView.separated(
+            itemCount: rows.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final PollVoter voter = rows[index];
+              return ListTile(
+                leading: SobhAvatar(name: voter.displayName),
+                title: Text(voter.displayName),
+                subtitle: voter.username == null
+                    ? null
+                    : Text('@${voter.username}'),
+                trailing: Text(
+                  DateFormat.Hm().format(voter.votedAt),
+                  style: TextStyle(color: palette.textSecondary),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

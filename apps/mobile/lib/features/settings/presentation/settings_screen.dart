@@ -10,6 +10,7 @@ import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
 import '../../stories/presentation/close_friends_screen.dart';
 import '../data/account_repository.dart';
+import 'data_rights_screen.dart';
 
 /// App settings (§43, §44, §55).
 class SettingsScreen extends ConsumerWidget {
@@ -88,6 +89,16 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const CloseFriendsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: Text(l10n.dataRightsTitle),
+            subtitle: Text(l10n.dataRightsSubtitle),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const DataRightsScreen(),
               ),
             ),
           ),

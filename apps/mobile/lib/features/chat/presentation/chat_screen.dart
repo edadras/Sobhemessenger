@@ -16,6 +16,7 @@ import '../../../core/theme/design_tokens.dart';
 import '../../auth/session_controller.dart';
 import '../../calls/data/call_controller.dart';
 import '../../calls/presentation/call_screen.dart';
+import '../../groups/data/groups_repository.dart';
 import '../../media/data/media_repository.dart';
 import '../../media/presentation/attachment_picker.dart';
 import '../../media/presentation/media_widgets.dart';
@@ -66,6 +67,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// How far the read cursor has been pushed, so scrolling does not send the
   /// same acknowledgement repeatedly.
   int _markedReadUpTo = 0;
+
+  /// Channel posts already counted on this screen, so a rebuild does not send
+  /// the same view again.
+  final Set<String> _viewed = <String>{};
 
   bool _typing = false;
   Timer? _typingStopTimer;
@@ -135,6 +140,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // Offline. The badge clears on the next open once the request lands, and
       // an error over a conversation the user is reading would be noise.
       _markedReadUpTo = 0;
+    }
+  }
+
+  /// Counts this reader against the channel posts on screen (§15).
+  ///
+  /// Only for channels: a group message has no view count, and asking would be
+  /// a request per message for a number nothing displays. Each post is counted
+  /// once per device-session — the server counts a person once anyway, but
+  /// there is no reason to send the same request on every rebuild.
+  Future<void> _countViews(List<MessageRow> rows) async {
+    final GroupsRepository groups = ref.read(groupsRepositoryProvider);
+    for (final MessageRow row in rows) {
+      if (row.deletedAt != null ||
+          row.id == row.clientMessageId ||
+          !_viewed.add(row.id)) {
+        continue;
+      }
+      try {
+        await groups.recordPostView(widget.chatId, row.id);
+      } on ApiException {
+        // A view that did not reach the server is not worth telling the
+        // reader about, and the post is on screen either way. Dropped from
+        // the set so the next open tries again.
+        _viewed.remove(row.id);
+      }
     }
   }
 
@@ -466,6 +496,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             unawaited(_markRead(rows));
+            if (chatType == 'channel') {
+              unawaited(_countViews(rows));
+            }
           }
         });
       }

@@ -8,6 +8,7 @@ import '../../../core/localization/generated/app_localizations.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
+import '../../groups/presentation/join_by_link_screen.dart';
 import '../data/search_repository.dart';
 
 /// Global search (§28).
@@ -68,7 +69,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ],
       ),
       body: _query.isEmpty
-          ? SobhEmptyState(icon: Icons.search, title: l10n.searchPrompt)
+          ? ListView(
+              children: <Widget>[
+                // An invite link arrives as a message somewhere else, so the
+                // place to redeem it is wherever someone goes to find a chat.
+                ListTile(
+                  leading: const Icon(Icons.link),
+                  title: Text(l10n.joinByLinkTitle),
+                  subtitle: Text(l10n.joinByLinkBody),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const JoinByLinkScreen(),
+                    ),
+                  ),
+                ),
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.only(top: SobhSpacing.xl),
+                  child: SobhEmptyState(
+                    icon: Icons.search,
+                    title: l10n.searchPrompt,
+                  ),
+                ),
+              ],
+            )
           : _Results(query: _query),
     );
   }

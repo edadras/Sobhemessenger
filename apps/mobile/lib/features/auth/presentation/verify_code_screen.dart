@@ -9,6 +9,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../session_controller.dart';
+import 'account_recovery_screen.dart';
 import 'phone_entry_screen.dart';
 
 /// Step two: verify the code, and collect the two-step password if the account
@@ -170,6 +171,23 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
                     errorText: _error,
                   ),
                   onSubmitted: (_) => _submit(),
+                ),
+                // Offered only here, because this is the only moment somebody
+                // discovers they have forgotten it. A recovery link on the
+                // phone-number screen would be an invitation to try addresses
+                // against the server.
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const AccountRecoveryScreen(),
+                              ),
+                            ),
+                    child: Text(l10n.recoveryForgotPassword),
+                  ),
                 ),
               ],
               const SizedBox(height: SobhSpacing.xl),

@@ -7,6 +7,7 @@ import 'package:libsignal_protocol_dart/libsignal_protocol_dart.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/storage/token_store.dart';
 import '../../auth/session_controller.dart';
 import 'signal_store.dart';
 
@@ -135,11 +136,17 @@ class SecretChatService {
   SecretChatService({
     required ApiClient api,
     required FlutterSecureStorage storage,
+    required TokenStore tokens,
   })  : _api = api,
-        _storage = storage;
+        _storage = storage,
+        _tokens = tokens;
 
   final ApiClient _api;
   final FlutterSecureStorage _storage;
+
+  /// Only for the signed-in user's own id, which the safety number is derived
+  /// from. No token is read through it here.
+  final TokenStore _tokens;
   final Uuid _uuid = const Uuid();
 
   SecureSignalStore? _store;
@@ -329,6 +336,53 @@ class SecretChatService {
   Future<bool> hasSessionWith(String deviceId) =>
       _requireStore().containsSession(_addressOf(deviceId));
 
+  /// Registers a freshly built session with the server, then marks it live.
+  ///
+  /// Two calls because they say different things. The first records that a
+  /// session exists and the safety number it carries; the second says the
+  /// keys have actually been used, which is what distinguishes a session that
+  /// was set up from one that works. Nothing secret travels either way — the
+  /// fingerprint is a public value derived from two identity keys, and is
+  /// exactly what the two people would read aloud to each other.
+  ///
+  /// Best effort. A session that could not be registered still encrypts and
+  /// decrypts perfectly well; the record is for showing the user which devices
+  /// they are talking to, and failing the message over it would be trading a
+  /// working conversation for bookkeeping.
+  Future<void> _recordSession({
+    required String chatId,
+    required String recipientUserId,
+    required DeviceBundle device,
+  }) async {
+    try {
+      final String? localUserId = await _tokens.readUserId();
+      final String fingerprint = localUserId == null
+          ? ''
+          : await safetyNumber(
+              localUserId: localUserId,
+              remoteUserId: recipientUserId,
+              remoteDeviceId: device.deviceId,
+            );
+
+      final Map<String, dynamic> created =
+          await _api.post<Map<String, dynamic>>(
+        '/secret/sessions',
+        body: <String, dynamic>{
+          'chat_id': chatId,
+          'recipient_device_id': device.deviceId,
+          'fingerprint': fingerprint,
+        },
+      );
+
+      final String? sessionId = created['session_id'] as String?;
+      if (sessionId != null) {
+        await _api.post<dynamic>('/secret/sessions/$sessionId/established');
+      }
+    } on Object {
+      // Recording is not what makes the conversation work.
+    }
+  }
+
   // ------------------------------------------------------------- messages
 
   /// Encrypts one message for every device of the recipient and posts them.
@@ -352,6 +406,16 @@ class SecretChatService {
     for (final DeviceBundle device in devices) {
       if (!await hasSessionWith(device.deviceId)) {
         await startSessionWith(device);
+        // Tell the server a session now exists between these two devices, and
+        // what its safety number is. The keys stay here — what is recorded is
+        // that a session was formed and the fingerprint both sides should be
+        // able to read back, so a later mismatch is visible rather than
+        // silently swallowed by a fresh session.
+        await _recordSession(
+          chatId: chatId,
+          recipientUserId: recipientUserId,
+          device: device,
+        );
       }
 
       final SessionCipher cipher = SessionCipher(
@@ -553,5 +617,6 @@ final Provider<SecretChatService> secretChatServiceProvider =
   (Ref ref) => SecretChatService(
     api: ref.watch(apiClientProvider),
     storage: ref.watch(secureStorageProvider),
+    tokens: ref.watch(tokenStoreProvider),
   ),
 );

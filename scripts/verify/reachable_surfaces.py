@@ -385,6 +385,196 @@ for label, method, path in (
     check(f"{label}: refused rather than broken",
           400 <= status < 500, f"{status} {body}")
 
+# ---------------------------------------------------------- invite links
+
+section("redeeming an invite link")
+
+status, body = call("POST", f"/chats/{group}/invite-links", alice_token,
+                    {"name": "probe"})
+invite = data_of(body)
+slug = invite.get("slug")
+check("an invite link can be made", bool(slug), f"{status} {body}")
+
+if slug:
+    status, body = call("POST", f"/chats/join/{slug}", carol_token)
+    check("somebody else can redeem it", status == 200, f"{status} {body}")
+    outcome = data_of(body)
+    check("the answer says they joined",
+          outcome.get("joined") is True, str(outcome))
+    check("and which chat they joined",
+          outcome.get("chat_id") == group, str(outcome))
+    # The app navigates on chat_type, so an absent one lands nowhere.
+    check("and what kind of chat it is",
+          outcome.get("chat_type") in ("group", "channel"), str(outcome))
+
+    # Redeeming twice is the ordinary case — someone taps the link again.
+    status, body = call("POST", f"/chats/join/{slug}", carol_token)
+    check("redeeming it again is not an error",
+          status == 200 and data_of(body).get("joined") is True,
+          f"{status} {body}")
+
+status, _ = call("POST", "/chats/join/not-a-real-slug", carol_token)
+check("an unknown link is refused", status == 404, f"got {status}")
+
+# --------------------------------------------------------- channel views
+
+section("counting a view on a channel post")
+
+status, body = call("POST", f"/chats/{channel}/messages", alice_token,
+                    {"client_message_id": str(uuid.uuid4()), "type": "text",
+                     "content": "شمارش بازدید"})
+viewed_post = data_of(body).get("id")
+check("a post to count views on", bool(viewed_post), f"{status} {body}")
+
+status, _ = call("POST", f"/chats/{channel}/join", bob_token)
+status, _ = call("POST",
+                 f"/chats/{channel}/messages/{viewed_post}/view", bob_token)
+check("a reader's view is accepted", status in (200, 204), f"got {status}")
+
+status, body = call("GET", f"/chats/{channel}/statistics?message_id={viewed_post}",
+                    alice_token)
+rows = data_of(body).get("statistics") or []
+counted = next((r for r in rows if r["message_id"] == viewed_post), None)
+# This is the claim the statistics screen rests on: something increments the
+# number it displays. Without it the screen shows zero for ever.
+check("the view reaches the statistics",
+      counted is not None and counted.get("view_count", 0) >= 1, str(rows))
+
+status, _ = call("POST",
+                 f"/chats/{channel}/messages/{viewed_post}/view", bob_token)
+status, body = call("GET", f"/chats/{channel}/statistics?message_id={viewed_post}",
+                    alice_token)
+rows = data_of(body).get("statistics") or []
+again = next((r for r in rows if r["message_id"] == viewed_post), None)
+check("the same reader is not counted twice",
+      again is not None and again.get("view_count") == counted.get("view_count"),
+      f"{counted} -> {again}")
+
+# ------------------------------------------------------------ data rights
+
+section("asking for your data, and asking to be forgotten")
+
+status, body = call("GET", "/me/data-requests", alice_token)
+check("the requests can be listed", status == 200, f"{status} {body}")
+check("the grace period comes with them",
+      isinstance(data_of(body).get("deletion_delay_seconds"), int),
+      str(data_of(body)))
+
+status, body = call("POST", "/me/data-requests", alice_token, {"type": "export"})
+check("an export can be asked for", status in (200, 201), f"{status} {body}")
+export_request = (data_of(body).get("request") or {}).get("id")
+
+status, body = call("POST", "/me/data-requests", carol_token, {"type": "delete"})
+check("a deletion can be asked for", status in (200, 201), f"{status} {body}")
+deletion = data_of(body).get("request") or {}
+deletion_id = deletion.get("id")
+# The delay is the whole reason a deletion is withdrawable.
+check("it is scheduled rather than immediate",
+      isinstance(deletion.get("execute_after"), str), str(deletion))
+
+status, body = call("GET", "/chats", carol_token)
+check("the account still works during the grace period",
+      status == 200, f"got {status}")
+
+if deletion_id:
+    status, _ = call("DELETE", f"/me/data-requests/{deletion_id}", carol_token)
+    check("a deletion can be withdrawn", status in (200, 204), f"got {status}")
+
+status, body = call("POST", "/me/data-requests", alice_token, {"type": "invent"})
+check("an unknown kind is refused", status == 422, f"{status} {body}")
+
+# ---------------------------------------------------------- poll voters
+
+section("who voted for what")
+
+status, body = call("POST", "/polls", alice_token,
+                    {"chat_id": group, "client_message_id": str(uuid.uuid4()),
+                     "question": "کدام؟", "options": ["الف", "ب"],
+                     "is_anonymous": False})
+poll = data_of(body)
+poll_id = poll.get("id")
+options = poll.get("options") or []
+check("an open poll can be created", bool(poll_id) and len(options) == 2,
+      f"{status} {body}")
+
+if poll_id and options:
+    option_id = options[0]["id"]
+    status, _ = call("POST", f"/polls/{poll_id}/vote", bob_token,
+                     {"option_ids": [option_id]})
+    check("somebody can vote", status in (200, 201), f"got {status}")
+
+    status, body = call("GET",
+                        f"/polls/{poll_id}/options/{option_id}/voters",
+                        alice_token)
+    check("the voters can be listed", status == 200, f"{status} {body}")
+    voters = data_of(body).get("voters")
+    check("the answer is a list", isinstance(voters, list), str(body))
+    if voters:
+        voter = voters[0]
+        # A list of bare ids is not something a screen can render, which is
+        # what this endpoint used to return.
+        for field in ("user_id", "display_name", "voted_at"):
+            check(f"a voter carries `{field}`", field in voter,
+                  str(sorted(voter)))
+
+    status, body = call("GET",
+                        f"/polls/{poll_id}/options/{options[1]['id']}/voters",
+                        alice_token)
+    check("an option nobody picked answers with an empty list, not null",
+          data_of(body).get("voters") == [], str(data_of(body)))
+
+status, body = call("POST", "/polls", alice_token,
+                    {"chat_id": group, "client_message_id": str(uuid.uuid4()),
+                     "question": "ناشناس؟", "options": ["الف", "ب"],
+                     "is_anonymous": True})
+secret_poll = data_of(body)
+if secret_poll.get("id") and secret_poll.get("options"):
+    status, _ = call("GET",
+                     f"/polls/{secret_poll['id']}/options/"
+                     f"{secret_poll['options'][0]['id']}/voters", alice_token)
+    # This is the promise an anonymous poll makes, and the one refusal here
+    # that must never soften.
+    check("an anonymous poll never says who voted",
+          status in (403, 409, 422), f"got {status}")
+
+# ---------------------------------------------------------- call signals
+
+section("what a call leg negotiated")
+
+status, body = call("POST", "/calls", alice_token,
+                    {"chat_id": private_chat, "type": "voice"})
+signal_call = data_of(body).get("id") or data_of(body).get("call_id")
+check("a call to signal on", bool(signal_call), f"{status} {body}")
+
+if signal_call:
+    for kind, payload in (
+        ("offer", {"sdp": "v=0 probe offer"}),
+        ("ice-candidate", {"candidate": "candidate:1 1 udp 1 10.0.0.1 1 typ host"}),
+        ("ice-candidate", {"candidate": "candidate:2 1 udp 1 10.0.0.2 2 typ host"}),
+    ):
+        status, body = call("POST", f"/calls/{signal_call}/signal", alice_token,
+                            {"to": bob_id, "type": kind,
+                             "network_type": "wifi", "payload": payload})
+        check(f"a {kind} is relayed", status in (200, 204), f"{status} {body}")
+
+    status, body = call("GET", f"/calls/{signal_call}/sessions", alice_token)
+    mine = next((s for s in (data_of(body).get("sessions") or [])
+                 if s.get("user_id") == alice_id), None)
+    check("the leg has a session record", mine is not None, str(data_of(body)))
+    if mine:
+        check("its offer was recorded", mine.get("has_offer") is True, str(mine))
+        # The handler validated `ice-candidate` while the repository matched
+        # `candidate`, so every candidate fell through and was never written.
+        check("its candidates were recorded too",
+              mine.get("candidate_count", 0) == 2, str(mine))
+        check("the network it is on was recorded",
+              mine.get("network_type") == "wifi", str(mine))
+
+    status, _ = call("POST", f"/calls/{signal_call}/signal", alice_token,
+                     {"to": bob_id, "type": "offer",
+                      "network_type": "carrier-pigeon", "payload": {}})
+    check("an unknown network type is refused", status == 422, f"got {status}")
+
 # ------------------------------------------------- the refused sign-in, last
 
 section("a refused code reaches the sign-in history")

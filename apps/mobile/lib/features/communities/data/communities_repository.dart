@@ -42,6 +42,10 @@ class Community {
 
   bool get isMember => role.isNotEmpty;
 
+  /// Whether this member may arrange the community's rooms. The server checks
+  /// the same thing; this only decides whether the control is offered.
+  bool get canArrange => role == 'owner' || role == 'admin';
+
   /// Rooms grouped by section, in the order the server returned them, so the
   /// author's arrangement survives round-tripping.
   Map<String, List<CommunityRoom>> get roomsBySection {
@@ -120,6 +124,30 @@ class CommunitiesRepository {
   /// Joins a community, which also joins its default rooms.
   Future<void> join(String communityId) =>
       _api.post<Map<String, dynamic>>('/communities/$communityId/join');
+
+  /// Adds an existing group or channel to the community.
+  Future<void> addRoom(
+    String communityId,
+    String chatId, {
+    String section = 'general',
+    int position = 0,
+  }) =>
+      _api.post<dynamic>(
+        '/communities/$communityId/rooms',
+        body: <String, dynamic>{
+          'chat_id': chatId,
+          'section': section,
+          'position': position,
+        },
+      );
+
+  /// Takes a room out of the community.
+  ///
+  /// The chat itself survives — this unfiles it, it does not delete it. A
+  /// community is an arrangement of chats, so removing one from the
+  /// arrangement should not destroy the conversation in it.
+  Future<void> removeRoom(String communityId, String chatId) =>
+      _api.delete<dynamic>('/communities/$communityId/rooms/$chatId');
 
   Future<void> leave(String communityId) =>
       _api.post<Map<String, dynamic>>('/communities/$communityId/leave');

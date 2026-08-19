@@ -254,6 +254,32 @@ class AccountRepository {
     ];
   }
 
+  // ----------------------------------------------------------- data rights
+
+  /// Export and deletion requests on this account (§60).
+  Future<DataRights> dataRequests() async {
+    final Map<String, dynamic> data =
+        await _api.get<Map<String, dynamic>>('/me/data-requests');
+    return DataRights.fromJson(data);
+  }
+
+  /// Asks for a copy of the account, or for the account to be deleted.
+  ///
+  /// A deletion does not take effect at once: the server holds it for a grace
+  /// period, and the account keeps working until then. That is what makes it
+  /// withdrawable by somebody who acted in anger, or whose account was deleted
+  /// by an intruder holding a session.
+  Future<DataRequest> requestData(String type) async {
+    final Map<String, dynamic> data = await _api.post<Map<String, dynamic>>(
+      '/me/data-requests',
+      body: <String, dynamic>{'type': type},
+    );
+    return DataRequest.fromJson(data['request'] as Map<String, dynamic>);
+  }
+
+  Future<void> cancelDataRequest(String requestId) =>
+      _api.delete<dynamic>('/me/data-requests/$requestId');
+
   // -------------------------------------------------------- email recovery
 
   Future<RecoveryEmail> recoveryEmail() async {
@@ -280,6 +306,107 @@ class AccountRepository {
 
   Future<void> removeRecoveryEmail() =>
       _api.delete<dynamic>('/auth/recovery/email');
+
+  /// Starts recovery for somebody locked out by a forgotten two-step password.
+  ///
+  /// Unauthenticated by design — the caller cannot sign in, which is the whole
+  /// problem. The server answers the same way whether or not the address is on
+  /// an account, so nothing here can be used to find out who has one.
+  Future<void> startRecovery(String email) => _api.post<dynamic>(
+        '/auth/recovery/email/start',
+        body: <String, dynamic>{'email': email},
+      );
+
+  /// Presents the code from the recovery address.
+  ///
+  /// Nobody is signed in by this. The account is still behind its phone number
+  /// and an OTP; what has gone is the forgotten second factor, along with
+  /// every session that existed before — which is what protects an account
+  /// somebody else already had a foothold in.
+  Future<void> completeRecovery(String email, String code) =>
+      _api.post<dynamic>(
+        '/auth/recovery/email/complete',
+        body: <String, dynamic>{'email': email, 'code': code},
+      );
+}
+
+/// One export or deletion request, and where it has got to.
+class DataRequest {
+  const DataRequest({
+    required this.id,
+    required this.type,
+    required this.status,
+    required this.executeAfter,
+    required this.createdAt,
+    this.resultMediaId,
+    this.error = '',
+    this.completedAt,
+  });
+
+  factory DataRequest.fromJson(Map<String, dynamic> json) => DataRequest(
+        id: json['id'] as String,
+        type: json['type'] as String? ?? 'export',
+        status: json['status'] as String? ?? 'pending',
+        executeAfter: DateTime.parse(json['execute_after'] as String).toLocal(),
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+        resultMediaId: json['result_media_id'] as String?,
+        error: json['error'] as String? ?? '',
+        completedAt: json['completed_at'] == null
+            ? null
+            : DateTime.parse(json['completed_at'] as String).toLocal(),
+      );
+
+  final String id;
+
+  /// `export` or `delete`.
+  final String type;
+  final String status;
+
+  /// When a deletion stops being reversible. Meaningless for an export, which
+  /// runs immediately.
+  final DateTime executeAfter;
+  final DateTime createdAt;
+
+  /// The finished export, once there is one, downloaded through the same
+  /// presigned path as any other file.
+  final String? resultMediaId;
+  final String error;
+  final DateTime? completedAt;
+
+  bool get isExport => type == 'export';
+  bool get isDeletion => type == 'delete';
+
+  /// Withdrawing is only offered while the request has not run.
+  bool get cancellable => status == 'pending' || status == 'processing';
+  bool get downloadable => status == 'ready' && resultMediaId != null;
+}
+
+/// The requests on the account, plus how long a deletion waits — which the
+/// server owns, so the screen states the real figure rather than a number
+/// hardcoded next to it that could drift.
+class DataRights {
+  const DataRights({
+    required this.requests,
+    required this.deletionDelay,
+  });
+
+  factory DataRights.fromJson(Map<String, dynamic> json) => DataRights(
+        requests: <DataRequest>[
+          for (final dynamic entry
+              in json['requests'] as List<dynamic>? ?? const <dynamic>[])
+            DataRequest.fromJson(entry as Map<String, dynamic>),
+        ],
+        deletionDelay: Duration(
+          seconds: (json['deletion_delay_seconds'] as num?)?.toInt() ?? 0,
+        ),
+      );
+
+  final List<DataRequest> requests;
+  final Duration deletionDelay;
+
+  DataRequest? get openDeletion => requests
+      .where((DataRequest r) => r.isDeletion && r.cancellable)
+      .firstOrNull;
 }
 
 /// The recovery address on the account (§4).
@@ -385,4 +512,9 @@ final FutureProvider<RecoveryEmail> recoveryEmailProvider =
 final FutureProvider<List<LoginEvent>> loginHistoryProvider =
     FutureProvider<List<LoginEvent>>(
   (Ref ref) => ref.watch(accountRepositoryProvider).loginHistory(),
+);
+
+final FutureProvider<DataRights> dataRightsProvider =
+    FutureProvider<DataRights>(
+  (Ref ref) => ref.watch(accountRepositoryProvider).dataRequests(),
 );

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/generated/app_localizations.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/design_tokens.dart';
 import '../../../core/widgets/async_states.dart';
@@ -151,6 +152,18 @@ class CommunityScreen extends ConsumerWidget {
                     onTap: room.isMember
                         ? () => context.go('/chats/${room.chatId}')
                         : null,
+                    trailing: data.canArrange
+                        ? IconButton(
+                            icon: const Icon(Icons.playlist_remove),
+                            tooltip: l10n.communitiesRemoveRoom,
+                            onPressed: () => _removeRoom(
+                              context,
+                              ref,
+                              communityId,
+                              room,
+                            ),
+                          )
+                        : null,
                   ),
               ],
             ],
@@ -158,5 +171,54 @@ class CommunityScreen extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  /// Unfiles a room from the community.
+  ///
+  /// Confirmed, and worded so it is clear the conversation survives: this
+  /// takes the room out of the arrangement, it does not delete the chat or
+  /// remove anybody from it.
+  Future<void> _removeRoom(
+    BuildContext context,
+    WidgetRef ref,
+    String communityId,
+    CommunityRoom room,
+  ) async {
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    final bool confirmed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) => AlertDialog(
+            title: Text(l10n.communitiesRemoveRoom),
+            content: Text(l10n.communitiesRemoveRoomConfirm(room.title)),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.commonRemove),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !context.mounted) {
+      return;
+    }
+
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(communitiesRepositoryProvider)
+          .removeRoom(communityId, room.chatId);
+      ref.invalidate(communityProvider(communityId));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error.isOffline ? l10n.errorNetwork : error.message),
+        ),
+      );
+    }
   }
 }

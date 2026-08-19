@@ -233,6 +233,18 @@ class GroupsRepository {
   Future<void> revokeInviteLink(String chatId, String linkId) =>
       _api.delete<Map<String, dynamic>>('/chats/$chatId/invite-links/$linkId');
 
+  /// Redeems an invite link.
+  ///
+  /// The app could make these links and not open one, which meant an invite
+  /// was a string somebody could send and nobody could use. What comes back
+  /// says which of the two things happened: joined outright, or a request
+  /// filed because the chat vets its members.
+  Future<JoinOutcome> joinByInvite(String slug) async {
+    final Map<String, dynamic> data =
+        await _api.post<Map<String, dynamic>>('/chats/join/$slug');
+    return JoinOutcome.fromJson(data);
+  }
+
   Future<List<JoinRequest>> joinRequests(String chatId) async {
     final Map<String, dynamic> data =
         await _api.get<Map<String, dynamic>>('/chats/$chatId/join-requests');
@@ -272,6 +284,16 @@ class GroupsRepository {
         '/chats/$chatId/transfer-ownership',
         body: <String, dynamic>{'user_id': userId},
       );
+
+  /// Counts one viewer against a channel post.
+  ///
+  /// The server counts a person once, so re-reading a channel does not inflate
+  /// anything and the call is safe to repeat. Without it the view figures on
+  /// the statistics screen stay at zero for ever: nothing else increments
+  /// them, and a channel author reading "0 views" on a post hundreds of people
+  /// opened would reasonably conclude the feature is broken.
+  Future<void> recordPostView(String chatId, String messageId) =>
+      _api.post<dynamic>('/chats/$chatId/messages/$messageId/view');
 
   /// Reach figures for specific channel posts.
   ///
@@ -352,6 +374,37 @@ class GroupsRepository {
         '/chats/$chatId/members/$userId/role-bundle',
         body: <String, dynamic>{'role_id': roleId},
       );
+}
+
+/// What redeeming an invite link did.
+class JoinOutcome {
+  const JoinOutcome({
+    required this.chatId,
+    required this.chatType,
+    required this.title,
+    required this.joined,
+    required this.pending,
+  });
+
+  factory JoinOutcome.fromJson(Map<String, dynamic> json) => JoinOutcome(
+        chatId: json['chat_id'] as String,
+        chatType: json['chat_type'] as String? ?? 'group',
+        title: json['title'] as String? ?? '',
+        joined: json['joined'] as bool? ?? false,
+        pending: json['pending'] as bool? ?? false,
+      );
+
+  final String chatId;
+  final String chatType;
+  final String title;
+
+  /// True when the person is in the chat now.
+  final bool joined;
+
+  /// True when a request was filed instead, because the chat approves its
+  /// members. Opening the conversation would show an empty room they cannot
+  /// post in, so the screen says to wait rather than navigating.
+  final bool pending;
 }
 
 /// Reach figures for one channel post (§15).
